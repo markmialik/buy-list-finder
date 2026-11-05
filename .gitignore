@@ -1,0 +1,3 @@
+# Personal data (imports, exports) never goes in the public repo
+data/
+.DS_Store

@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Link test</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font: 17px/1.4 -apple-system, system-ui, sans-serif; margin: 0; padding: 16px; max-width: 640px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  h2 { font-size: 15px; text-transform: uppercase; letter-spacing: .04em; color: #555; margin: 24px 0 8px; }
+  label { display: block; font-weight: 600; margin: 12px 0 4px; }
+  input { width: 100%; font-size: 18px; padding: 12px; border: 1px solid #aaa; border-radius: 10px; }
+  .hint { color: #555; font-size: 14px; margin: 4px 0 0; }
+  .warn { color: #8a5a00; font-size: 14px; margin: 8px 0 0; }
+  .link { margin: 0 0 22px; }
+  .what { font-size: 15px; margin: 0 0 6px; }
+  a.btn { display: block; padding: 18px 16px; border-radius: 14px; background: #0a5bd3; color: #fff;
+          text-decoration: none; font-weight: 600; text-align: center; font-size: 18px; }
+  a.btn.go { background: #1c7c3a; }
+  a.btn.fb { background: #6b3fb0; }
+  .url { font: 12px/1.35 ui-monospace, Menlo, monospace; color: #444; word-break: break-all; margin: 6px 2px 0; }
+  .check { background: #f3f3f3; border-radius: 12px; padding: 12px 16px; margin-top: 28px; }
+  pre.item { font-size: 12px; background: #f3f3f3; padding: 10px; border-radius: 10px; overflow-x: auto; }
+</style>
+</head>
+<body>
+<h1>Link test</h1>
+<p class="hint">Temporary page. Tap each link on your iPhone and note what happens.</p>
+
+<h2>Your values (saved on this device only)</h2>
+<label for="zip">Home ZIP</label>
+<input id="zip" inputmode="numeric" autocomplete="off" placeholder="e.g. 10001">
+<label for="fbloc">Facebook location ID (optional)</label>
+<input id="fbloc" autocomplete="off" placeholder="leave empty to use your account location">
+<p class="hint">The ZIP is needed for the eBay distance filter. The Facebook ID is the part after /marketplace/ in a Marketplace URL.</p>
+<p class="warn" id="zipwarn" hidden>No valid 5-digit ZIP: eBay links will have no distance filter.</p>
+
+<h2>Sample item</h2>
+<pre class="item" id="itemjson"></pre>
+
+<h2>Links</h2>
+<div id="links"></div>
+
+<div class="check">
+  <strong>For each link note:</strong>
+  <ul>
+    <li>Did it open the App or Safari?</li>
+    <li>Were the filters still applied? (Buy It Now / Auction, sort order, price &le; $800, Used, within 50 mi)</li>
+  </ul>
+  <p class="hint">Also note the Facebook radius shown (the sample asks for 50 mi, which is rounded up to 60) and whether the Facebook condition filter shows Used.</p>
+</div>
+
+<script src="js/links.js"></script>
+<script>
+(function () {
+  var SAMPLE = {
+    id: 'test', name: 'hamilton khaki field bronze', search_on: 'both',
+    category: 'Wristwatches', condition: 'used',
+    min_price: null, max_price: 800, distance_mi: 50
+  };
+  var DEFAULT_FB_RADIUS_MI = 40;
+
+  var zipEl = document.getElementById('zip');
+  var fbEl = document.getElementById('fbloc');
+  var zipWarn = document.getElementById('zipwarn');
+  var linksEl = document.getElementById('links');
+  document.getElementById('itemjson').textContent =
+    JSON.stringify(SAMPLE, null, 1) + '\nsettings.default_fb_radius_mi = ' + DEFAULT_FB_RADIUS_MI;
+
+  function load(key) { try { return localStorage.getItem(key) || ''; } catch (e) { return ''; } }
+  function save(key, v) { try { localStorage.setItem(key, v); } catch (e) {} }
+
+  zipEl.value = load('blf_test_zip');
+  fbEl.value = load('blf_test_fbloc');
+
+  function via(url) { return 'go.html?u=' + encodeURIComponent(url); }
+
+  function row(label, href, url, cls) {
+    var wrap = document.createElement('div');
+    wrap.className = 'link';
+    var p = document.createElement('p');
+    p.className = 'what';
+    p.textContent = label;
+    var a = document.createElement('a');
+    a.className = 'btn ' + (cls || '');
+    a.href = href;
+    a.textContent = 'Open';
+    var u = document.createElement('div');
+    u.className = 'url';
+    u.textContent = url;
+    wrap.appendChild(p); wrap.appendChild(a); wrap.appendChild(u);
+    linksEl.appendChild(wrap);
+  }
+
+  function render() {
+    var zip = zipEl.value.trim();
+    var fb = fbEl.value.trim();
+    var settings = {
+      home_zip: zip || null,
+      fb_location_id: fb || null,
+      default_fb_radius_mi: DEFAULT_FB_RADIUS_MI
+    };
+    var ebayNew = BuyLinks.buildEbayNewUrl(SAMPLE, settings);
+    var ebayEnd = BuyLinks.buildEbayEndingUrl(SAMPLE, settings);
+    var fbUrl = BuyLinks.buildFacebookUrl(SAMPLE, settings);
+
+    zipWarn.hidden = !!ebayNew && /[?&]_stpos=/.test(ebayNew);
+
+    linksEl.textContent = '';
+    row('1. eBay New - direct link. Should open the eBay app if installed.', ebayNew, ebayNew);
+    row('2. eBay New - via go.html. Should stay in Safari.', via(ebayNew), ebayNew, 'go');
+    row('3. eBay Ending soon - direct. Should open the eBay app if installed.', ebayEnd, ebayEnd);
+    row('4. eBay Ending soon - via go.html. Should stay in Safari.', via(ebayEnd), ebayEnd, 'go');
+    row('5. Facebook - direct. Should open the Facebook app if installed.', fbUrl, fbUrl, 'fb');
+    row('6. Facebook - via go.html. Should stay in Safari.', via(fbUrl), fbUrl, 'fb go');
+    row('7. fb://marketplace - should open the Facebook app on its Marketplace home (fallback check).', 'fb://marketplace', 'fb://marketplace', 'fb');
+  }
+
+  zipEl.addEventListener('input', function () { save('blf_test_zip', zipEl.value.trim()); render(); });
+  fbEl.addEventListener('input', function () { save('blf_test_fbloc', fbEl.value.trim()); render(); });
+  render();
+})();
+</script>
+</body>
+</html>
