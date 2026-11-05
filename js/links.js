@@ -13,7 +13,8 @@
  * checked against the live sites. Codes were cross-checked against URLs that
  * browsers produced and that people committed to public GitHub repos, plus
  * eBay category pages found via web search. Anything not confirmed that way
- * is tagged "UNVERIFIED:". The iPhone test page (test.html) is the real check.
+ * is tagged "UNVERIFIED:". iPhone test (Nov 2026): the eBay app keeps every
+ * filter from these links; the Facebook app keeps the words but drops filters.
  */
 (function (root) {
   'use strict';
@@ -34,10 +35,10 @@
         condition: 'LH_ItemCondition', // verified
         buyItNow: 'LH_BIN',          // verified
         auction: 'LH_Auction',       // verified
-        sort: '_sop',                // verified
-        zip: '_stpos',               // verified (browser-captured URLs)
-        distance: '_sadis'           // verified (browser-captured URLs)
+        sort: '_sop'                 // verified
       },
+      // No distance filter on eBay: everything ships, so searches are nationwide.
+      // (If ever needed again: _stpos=<zip>&_sadis=<mi>&_fspt=1&LH_PrefLoc=99.)
 
       // _sop values. 10 = Newly listed, 1 = Ending soonest (both appear in
       // captured URLs and third-party docs; the on-page sort label itself
@@ -47,20 +48,6 @@
       // LH_ItemCondition values. 1000 = New, 3000 = Used, 7000 = For parts or
       // not working. 'any' / null = parameter omitted.
       condition: { 'new': '1000', used: '3000', for_parts: '7000' },
-
-      // Extra params that real eBay "Distance" filter URLs carry together with
-      // _stpos/_sadis (seen in many browser-captured URLs, e.g.
-      // ...&_stpos=10601&LH_PrefLoc=99&_sadis=25&_fspt=1).
-      // Some captured URLs work with only _stpos+_sadis+_fspt, so
-      // LH_PrefLoc=99 is probably "item location = within distance of ZIP"
-      // but that meaning is UNVERIFIED. Empty this list to drop them.
-      distanceExtraParams: [['_fspt', '1'], ['LH_PrefLoc', '99']],
-
-      // Distance presets (miles). UNVERIFIED: only 10, 15, 25, 50, 75, 100,
-      // 200, 500, 1000 were seen in real URLs; 150/750/1500/2000 come from the
-      // older eBay advanced-search form. Requested distance is rounded UP to
-      // the next preset (capped at the largest one).
-      distancePresetsMi: [10, 15, 25, 50, 75, 100, 150, 200, 500, 750, 1000, 1500, 2000],
 
       // Category name (as stored in the user's data) -> eBay US category id.
       // Matching is case-insensitive; "·" and "," are treated the same
@@ -134,7 +121,7 @@
   }
 
   function toNumber(v) {
-    if (v === null || v === undefined || v === '') { return null; }
+    if (isBlank(v)) { return null; }
     var n = Number(v);
     return (isFinite(n) && n >= 0) ? n : null;
   }
@@ -249,12 +236,6 @@
     return parts.join(' ');
   }
 
-  function cleanZip(zip) {
-    if (isBlank(zip)) { return null; }
-    var m = String(zip).trim().match(/^(\d{5})(?:-\d{4})?$/);
-    return m ? m[1] : null;   // US ZIPs only (eBay.com)
-  }
-
   // pairs: array of [name, value]; null/undefined values are skipped.
   function buildQuery(pairs) {
     var out = [];
@@ -266,10 +247,11 @@
     return out.join('&');
   }
 
-  // mode: 'bin' (Buy It Now, newly listed) or 'auction' (ending soonest)
+  // mode: 'bin' (Buy It Now, newly listed) or 'auction' (ending soonest).
+  // settings is unused for eBay (no distance filter) but kept so all
+  // builders share one signature.
   function buildEbayUrl(item, settings, mode) {
     if (!canSearch(item)) { return null; }
-    settings = settings || {};
     var c = CODES.ebay;
     var p = c.param;
     var pairs = [];
@@ -296,16 +278,6 @@
     var cond = item.condition;
     if (cond && Object.prototype.hasOwnProperty.call(c.condition, cond)) {
       pairs.push([p.condition, c.condition[cond]]);
-    }
-
-    var miles = toNumber(item.distance_mi);
-    var zip = cleanZip(settings.home_zip);
-    if (miles !== null && miles > 0 && zip) {
-      pairs.push([p.zip, zip]);
-      pairs.push([p.distance, roundUpToPreset(miles, c.distancePresetsMi)]);
-      for (var i = 0; i < c.distanceExtraParams.length; i++) {
-        pairs.push([c.distanceExtraParams[i][0], c.distanceExtraParams[i][1]]);
-      }
     }
 
     return c.base + '?' + buildQuery(pairs);

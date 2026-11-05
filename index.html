@@ -1,0 +1,311 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#f3f4f6" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0f1216" media="(prefers-color-scheme: dark)">
+<meta name="robots" content="noindex">
+<!-- No apple-mobile-web-app-capable on purpose: the home-screen icon must open
+     in normal Safari so eBay/Facebook links hand off to their apps. -->
+<meta name="apple-mobile-web-app-title" content="Buy List">
+<title>Buy List Finder</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon.png">
+<link rel="icon" href="icon.png" type="image/png">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<noscript><p class="boot-msg">Buy List Finder needs JavaScript.</p></noscript>
+
+<!-- Shown until we know whether you are signed in -->
+<div id="boot" class="boot">
+  <p id="boot-msg" class="boot-msg" role="status">Loading&hellip;</p>
+  <button type="button" id="boot-reload" class="btn" hidden>Reload</button>
+</div>
+
+<!-- ============ Sign-in ============ -->
+<main id="screen-login" class="login" hidden>
+  <form id="login-form" class="login-card" novalidate>
+    <h1>Buy List Finder</h1>
+    <p class="muted">Sign in to see your list.</p>
+
+    <div class="field">
+      <label for="login-email">Email</label>
+      <input id="login-email" name="email" type="email" inputmode="email" autocomplete="username"
+             autocapitalize="none" autocorrect="off" spellcheck="false" required>
+    </div>
+    <div class="field">
+      <label for="login-password">Password</label>
+      <input id="login-password" name="password" type="password" autocomplete="current-password" required>
+    </div>
+
+    <p id="login-error" class="form-error" role="alert" hidden></p>
+    <button type="submit" id="login-submit" class="btn btn-primary btn-block">Sign in</button>
+  </form>
+</main>
+
+<!-- ============ List ============ -->
+<div id="screen-app" hidden>
+  <header class="topbar" id="topbar">
+    <div class="topbar-inner">
+      <div class="topbar-row">
+        <h1 class="app-title">Buy List</h1>
+        <div class="search">
+          <label for="search" class="sr-only">Search items</label>
+          <input id="search" type="search" placeholder="Search name, rules, notes" autocomplete="off"
+                 autocapitalize="none" autocorrect="off" spellcheck="false" enterkeyhint="search">
+        </div>
+        <button type="button" id="btn-settings" class="icon-btn" aria-label="Settings">&#9881;</button>
+      </div>
+      <div class="chips" id="chips" role="group" aria-label="Filters">
+        <button type="button" class="chip" data-status="hunting" aria-pressed="true">Hunting</button>
+        <button type="button" class="chip" data-status="paused" aria-pressed="false">Paused</button>
+        <button type="button" class="chip" data-status="bought" aria-pressed="false">Bought</button>
+        <button type="button" class="chip" data-status="all" aria-pressed="false">All</button>
+        <span class="chip-sep" aria-hidden="true"></span>
+        <button type="button" class="chip" data-toggle="highOnly" aria-pressed="false">High priority</button>
+        <button type="button" class="chip" data-toggle="fbOnly" aria-pressed="false">FB only</button>
+        <button type="button" class="chip" data-toggle="noAlert" aria-pressed="false">High priority &middot; no alert yet</button>
+      </div>
+    </div>
+  </header>
+
+  <div id="banner" class="banner" role="status" hidden>
+    <span id="banner-text"></span>
+    <button type="button" id="banner-retry" class="btn-text">Retry</button>
+  </div>
+
+  <main class="content">
+    <div class="meta-row">
+      <div class="field-inline">
+        <label for="category-filter" class="sr-only">Category</label>
+        <select id="category-filter"></select>
+      </div>
+      <p id="count" class="count" aria-live="polite"></p>
+    </div>
+
+    <ul id="list" class="list"></ul>
+    <div id="empty" class="empty" hidden>
+      <p id="empty-text"></p>
+      <button type="button" id="empty-action" class="btn" hidden></button>
+    </div>
+  </main>
+
+  <button type="button" id="fab" class="fab" aria-label="Add item">+</button>
+</div>
+
+<!-- ============ Editor sheet ============ -->
+<dialog id="editor" class="sheet" aria-labelledby="editor-title">
+  <form id="editor-form" novalidate>
+    <header class="sheet-head">
+      <h2 id="editor-title">Add item</h2>
+      <button type="button" id="editor-x" class="icon-btn" aria-label="Close without saving">&times;</button>
+    </header>
+
+    <div class="sheet-scroll">
+      <div class="field">
+        <label for="f-name">Name</label>
+        <input id="f-name" type="text" maxlength="200" autocomplete="off" autocapitalize="none"
+               aria-describedby="f-name-hint f-name-err" required>
+        <p class="hint" id="f-name-hint">Use -word to exclude on eBay, e.g. <em>seiko diver -solar</em></p>
+        <p class="field-error" id="f-name-err" role="alert"></p>
+      </div>
+
+      <fieldset class="field">
+        <legend>Search on</legend>
+        <div class="segs">
+          <label><input type="radio" name="search_on" value="both"><span>Both</span></label>
+          <label><input type="radio" name="search_on" value="ebay"><span>eBay</span></label>
+          <label><input type="radio" name="search_on" value="facebook"><span>Facebook</span></label>
+        </div>
+      </fieldset>
+
+      <fieldset class="field">
+        <legend>Status</legend>
+        <div class="segs">
+          <label><input type="radio" name="status" value="hunting"><span>Hunting</span></label>
+          <label><input type="radio" name="status" value="paused"><span>Paused</span></label>
+          <label><input type="radio" name="status" value="bought"><span>Bought</span></label>
+        </div>
+      </fieldset>
+
+      <fieldset class="field">
+        <legend>Priority</legend>
+        <div class="segs">
+          <label><input type="radio" name="priority" value="high"><span>High</span></label>
+          <label><input type="radio" name="priority" value="normal"><span>Normal</span></label>
+          <label><input type="radio" name="priority" value="low"><span>Low</span></label>
+        </div>
+      </fieldset>
+
+      <div class="field">
+        <label for="f-category">Category</label>
+        <input id="f-category" type="text" list="category-options" maxlength="100" autocomplete="off"
+               aria-describedby="f-category-hint">
+        <datalist id="category-options"></datalist>
+        <p class="hint" id="f-category-hint">Known eBay categories narrow the eBay search. Leave blank for all categories.</p>
+      </div>
+
+      <fieldset class="field">
+        <legend>Condition</legend>
+        <div class="segs">
+          <label><input type="radio" name="condition" value="any"><span>Any</span></label>
+          <label><input type="radio" name="condition" value="new"><span>New</span></label>
+          <label><input type="radio" name="condition" value="used"><span>Used</span></label>
+          <label><input type="radio" name="condition" value="for_parts"><span>For parts</span></label>
+        </div>
+      </fieldset>
+
+      <div class="field-row">
+        <div class="field">
+          <label for="f-min">Min price ($)</label>
+          <input id="f-min" type="text" inputmode="decimal" autocomplete="off" placeholder="none"
+                 aria-describedby="f-min-err">
+          <p class="field-error" id="f-min-err" role="alert"></p>
+        </div>
+        <div class="field">
+          <label for="f-max">Max price ($)</label>
+          <input id="f-max" type="text" inputmode="decimal" autocomplete="off" placeholder="none"
+                 aria-describedby="f-max-err">
+          <p class="field-error" id="f-max-err" role="alert"></p>
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="f-distance">Facebook distance (mi)</label>
+        <input id="f-distance" type="text" inputmode="numeric" autocomplete="off" placeholder="default radius"
+               aria-describedby="f-distance-hint f-distance-err">
+        <p class="hint" id="f-distance-hint">From your home area. Blank = your default radius. eBay always searches nationwide.</p>
+        <p class="field-error" id="f-distance-err" role="alert"></p>
+      </div>
+
+      <div class="field">
+        <label for="f-what">What counts</label>
+        <textarea id="f-what" rows="3" maxlength="2000"
+                  aria-describedby="f-what-hint"></textarea>
+        <p class="hint" id="f-what-hint">The rule for a listing to be worth buying (model, size, condition, deal breakers).</p>
+      </div>
+
+      <div class="field">
+        <label for="f-target">My target price ($)</label>
+        <input id="f-target" type="text" inputmode="decimal" autocomplete="off" placeholder="none"
+               aria-describedby="f-target-err">
+        <p class="field-error" id="f-target-err" role="alert"></p>
+      </div>
+
+      <div class="field">
+        <label for="f-notes">My notes</label>
+        <textarea id="f-notes" rows="3" maxlength="4000"></textarea>
+      </div>
+
+      <fieldset class="field">
+        <legend>Alerts already set up</legend>
+        <label class="check"><input type="checkbox" id="f-ebay-alert"><span>eBay alert is on</span></label>
+        <label class="check"><input type="checkbox" id="f-fb-alert"><span>Facebook alert is on</span></label>
+      </fieldset>
+
+      <details class="research" id="editor-research" hidden>
+        <summary>Research (filled by agents)</summary>
+        <div id="editor-research-body" class="research-body"></div>
+      </details>
+    </div>
+
+    <footer class="sheet-foot">
+      <p id="editor-error" class="form-error" role="alert" hidden></p>
+      <div class="sheet-actions">
+        <button type="button" id="editor-delete" class="btn btn-danger" hidden>Delete</button>
+        <span class="spacer"></span>
+        <button type="button" id="editor-cancel" class="btn">Cancel</button>
+        <button type="submit" id="editor-save" class="btn btn-primary">Save</button>
+      </div>
+    </footer>
+  </form>
+</dialog>
+
+<!-- ============ Settings sheet ============ -->
+<dialog id="settings" class="sheet" aria-labelledby="settings-title">
+  <div class="sheet-head">
+    <h2 id="settings-title">Settings</h2>
+    <button type="button" id="settings-x" class="icon-btn" aria-label="Close settings">&times;</button>
+  </div>
+
+  <div class="sheet-scroll">
+    <form id="settings-form" novalidate>
+      <div class="field">
+        <label for="s-zip">Home ZIP</label>
+        <input id="s-zip" type="text" inputmode="numeric" maxlength="5" autocomplete="postal-code"
+               placeholder="5 digits" aria-describedby="s-zip-hint s-zip-err">
+        <p class="hint" id="s-zip-hint">Saved for future deal agents. Links don't use it: eBay searches nationwide, and Facebook uses the location below.</p>
+        <p class="field-error" id="s-zip-err" role="alert"></p>
+      </div>
+
+      <div class="field">
+        <label for="s-fbloc">Facebook location ID</label>
+        <input id="s-fbloc" type="text" autocomplete="off" autocapitalize="none" autocorrect="off"
+               spellcheck="false" aria-describedby="s-fbloc-hint">
+        <p class="hint" id="s-fbloc-hint">The part after /marketplace/ in the address bar. Blank = your account location.</p>
+      </div>
+
+      <div class="field">
+        <label for="s-radius">Default Facebook radius (miles)</label>
+        <input id="s-radius" type="text" inputmode="numeric" autocomplete="off"
+               aria-describedby="s-radius-err">
+        <p class="field-error" id="s-radius-err" role="alert"></p>
+      </div>
+
+      <p id="settings-error" class="form-error" role="alert" hidden></p>
+      <button type="submit" id="settings-save" class="btn btn-primary btn-block">Save settings</button>
+    </form>
+
+    <hr class="divider">
+
+    <form id="pw-form" novalidate>
+      <h3>Change password</h3>
+      <div class="field">
+        <label for="pw-new">New password</label>
+        <input id="pw-new" type="password" autocomplete="new-password" aria-describedby="pw-hint">
+        <p class="hint" id="pw-hint">At least 8 characters.</p>
+      </div>
+      <div class="field">
+        <label for="pw-again">New password again</label>
+        <input id="pw-again" type="password" autocomplete="new-password">
+      </div>
+      <p id="pw-msg" class="form-error" role="alert" hidden></p>
+      <button type="submit" id="pw-save" class="btn btn-block">Change password</button>
+    </form>
+
+    <hr class="divider">
+
+    <p class="muted small" id="signed-in-as"></p>
+    <button type="button" id="btn-signout" class="btn btn-block">Sign out</button>
+  </div>
+</dialog>
+
+<!-- ============ Confirm dialog ============ -->
+<dialog id="confirm" class="confirm" aria-labelledby="confirm-title" aria-describedby="confirm-text">
+  <form method="dialog">
+    <h2 id="confirm-title">Are you sure?</h2>
+    <p id="confirm-text"></p>
+    <div class="sheet-actions">
+      <span class="spacer"></span>
+      <button type="submit" value="cancel" id="confirm-cancel" class="btn">Cancel</button>
+      <button type="submit" value="ok" id="confirm-ok" class="btn btn-danger">OK</button>
+    </div>
+  </form>
+</dialog>
+
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+<!-- Supabase JS v2.119.0, pinned, with Subresource Integrity -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.0/dist/umd/supabase.js"
+        integrity="sha384-uteMfOloLDGt042uDz+xHGF3ym63/WQ6rFq7murQRG8Ih7QrXGEGNtWd8688sb4O"
+        crossorigin="anonymous"></script>
+<script src="js/config.js"></script>
+<script src="js/links.js"></script>
+<script src="js/db.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
