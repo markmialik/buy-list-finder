@@ -281,7 +281,18 @@
         break;
       }
     }
-    if (!found) { state.items.push(row); }
+    if (!found) {
+      // A new item. The database gave it its place (the top, place 1) and moved
+      // every other item down one. Do the same here so the screen matches.
+      var at = Number(row.list_order);
+      if (row.list_order !== null && row.list_order !== undefined && isFinite(at) && at > 0) {
+        state.items.forEach(function (it) {
+          var n = Number(it.list_order);
+          if (it.list_order !== null && it.list_order !== undefined && isFinite(n) && n >= at) { it.list_order = n + 1; }
+        });
+      }
+      state.items.push(row);
+    }
     state.items = DB.sortItems(state.items);
   }
 
@@ -1100,6 +1111,8 @@
     if (!ok) { clearSweepStorage(); return null; }
     // How many searches were really opened (skips don't count).
     if (!isInt(sw.opened) || sw.opened < 0) { sw.opened = sw.phase === 'away' ? sw.index + 1 : sw.index; }
+    // The item you looked at last (for its priority buttons). Anything odd is dropped.
+    if (sw.lastId !== undefined && typeof sw.lastId !== 'number' && typeof sw.lastId !== 'string') { delete sw.lastId; }
     return sw;
   }
 
@@ -1139,6 +1152,7 @@
     if (!state.loaded || document.visibilityState !== 'visible') { return; }
     var sw = readSweep();
     if (sw && sw.phase === 'away') {
+      sw.lastId = sw.ids[sw.index];   // the item you just looked at
       sw.index += 1;           // the item we sent you to is done; on to the next
       settleSweep(sw);
       return;
@@ -1155,6 +1169,7 @@
     setTimeout(function () {
       var sw = readSweep();
       if (sw && sw.phase === 'away') {
+        sw.lastId = sw.ids[sw.index];
         sw.index += 1;
         settleSweep(sw);
       }
@@ -1243,13 +1258,23 @@
   function checkView() {
     var sw = readSweep();
     if (!sw || sw.phase === 'away') { return null; }
-    if (sw.phase === 'done') { return { mode: 'done', count: sw.opened }; }
+
+    // The item you just looked at, so you can set its priority.
+    var lastItem = sw.lastId !== undefined ? itemById(sw.lastId) : null;
+    var last = lastItem ? {
+      id: String(lastItem.id),
+      name: str(lastItem.name) || '(no name)',
+      priority: oneOf(lastItem.priority, PRIORITIES, 'normal')
+    } : null;
+
+    if (sw.phase === 'done') { return { mode: 'done', count: sw.opened, last: last }; }
 
     var item = itemById(sw.ids[sw.index]);
     if (!item) { return null; }
     var t = effectiveTarget(item);
     return {
       mode: 'ready',
+      last: last,
       site: sw.site,
       n: sw.index + 1,
       total: sw.ids.length,
@@ -1274,11 +1299,56 @@
     return a;
   }
 
+  // "Just checked" row: High / Normal / Low buttons for the item you just
+  // looked at. The one it has now is filled in.
+  function lastCheckedRow(last) {
+    var wrap = h('div', { 'class': 'check-last' },
+      h('p', { 'class': 'check-last-name' }, 'Just checked: ', h('strong', null, last.name)));
+    var group = h('div', { 'class': 'check-prio', role: 'group', 'aria-label': 'Priority for ' + last.name });
+    PRIORITIES.forEach(function (p) {
+      var on = last.priority === p;
+      var b = h('button', {
+        type: 'button', 'class': 'check-prio-btn is-' + p + (on ? ' is-on' : ''),
+        'aria-pressed': on ? 'true' : 'false', 'data-fk': 'chk:prio:' + p
+      }, cap(p));
+      b.addEventListener('click', function () { setLastPriority(last.id, p); });
+      group.appendChild(b);
+    });
+    wrap.appendChild(group);
+    return wrap;
+  }
+
+  // Saves the priority picked on the panel.
+  var prioBusy = false;
+  async function setLastPriority(id, priority) {
+    if (prioBusy) { return; }
+    var item = itemById(id);
+    if (!item) { return; }
+    var name = str(item.name) || '(no name)';
+    if (item.priority === priority) { toast(name + ' is already ' + priority + ' priority'); return; }
+    prioBusy = true;
+    var btns = $('check-panel').querySelectorAll('.check-prio-btn');
+    for (var i = 0; i < btns.length; i++) { btns[i].disabled = true; }
+    try {
+      var row = await DB.updateItem(item.id, { priority: priority });
+      mergeItem(row);
+      saveCache();
+      renderAll();             // also redraws the panel with the new priority filled in
+      toast(name + ': ' + cap(priority) + ' priority');
+    } catch (e) {
+      handleError(e, "Couldn't save the priority.");
+    } finally {
+      prioBusy = false;
+      renderCheckPanel(true);  // buttons back on, even after an error
+    }
+  }
+
   function buildCheckPanel(v) {
     var inner = h('div', { 'class': 'check-inner' });
 
     if (v.mode === 'done') {
       inner.appendChild(h('p', { 'class': 'check-done' }, 'Done. Checked ' + plural(v.count, 'item', 'items') + '.'));
+      if (v.last) { inner.appendChild(lastCheckedRow(v.last)); }
       inner.appendChild(h('div', { 'class': 'check-actions' },
         checkButton('Close', 'chk:close', 'btn-primary', stopSweep)));
       return inner;
@@ -1288,8 +1358,11 @@
       h('span', { 'class': 'check-step' }, v.n + ' of ' + v.total),
       h('span', { 'class': 'check-site' }, v.site === 'ebay' ? 'eBay newest' : 'Facebook')));
     inner.appendChild(h('progress', { 'class': 'check-bar', max: v.total, value: v.n, 'aria-label': 'Progress' }));
-    inner.appendChild(h('p', { 'class': 'check-next' },
-      'Next: ', h('strong', null, v.name), ' ', h('span', { 'class': 'id' }, '#' + v.id)));
+    if (v.last) { inner.appendChild(lastCheckedRow(v.last)); }
+    // The next item's name, big so it is easy to read at a glance.
+    inner.appendChild(h('p', { 'class': 'check-next-label' }, 'Next'));
+    inner.appendChild(h('p', { 'class': 'check-name' },
+      v.name, ' ', h('span', { 'class': 'id' }, '#' + v.id)));
     inner.appendChild(h('p', { 'class': 'check-target' }, v.target));
     if (v.hint) { inner.appendChild(h('p', { 'class': 'check-hint' }, v.hint)); }
 
@@ -2105,6 +2178,58 @@
   }
 
   // ---------------------------------------------------------------------------
+  // Quick add: type what you want to look for, tap Add. The new item gets the
+  // usual defaults (both sites, hunting, normal priority, any condition) and
+  // goes to the top of the list. "More options" opens the full form instead.
+  // ---------------------------------------------------------------------------
+  var quickAddBusy = false;
+
+  async function submitQuickAdd(ev) {
+    ev.preventDefault();
+    if (quickAddBusy) { return; }
+    var input = $('quick-add-name');
+    var name = input.value.replace(/\s+/g, ' ').trim();
+    if (!name) {
+      input.value = '';
+      input.focus();
+      toast('Type what you want to look for first.');
+      return;
+    }
+    quickAddBusy = true;
+    var btn = $('quick-add-btn');
+    btn.disabled = true;
+    btn.textContent = 'Adding…';
+    try {
+      var row = await DB.addItem({ name: name, search_on: 'both', status: 'hunting', priority: 'normal', condition: 'any' });
+      mergeItem(row);
+      saveCache();
+      input.value = '';
+      renderAll();
+      toast('Added to the top: ' + name + (matchesFilters(row) ? '' : ' (the current filters hide it)'));
+    } catch (e) {
+      handleError(e, "Couldn't add the item.");
+    } finally {
+      quickAddBusy = false;
+      btn.disabled = false;
+      btn.textContent = 'Add';
+    }
+  }
+
+  // Opens the full "Add item" form with what you typed already in the name.
+  function quickAddMore() {
+    var input = $('quick-add-name');
+    var typed = input.value.replace(/\s+/g, ' ').trim();
+    input.value = '';
+    openEditor(null);
+    if (typed) { $('f-name').value = typed; }
+  }
+
+  function wireQuickAdd() {
+    $('quick-add').addEventListener('submit', submitQuickAdd);
+    $('quick-add-more').addEventListener('click', quickAddMore);
+  }
+
+  // ---------------------------------------------------------------------------
   // Auth events + start-up
   // ---------------------------------------------------------------------------
   function onAuthEvent(event, session) {
@@ -2130,6 +2255,7 @@
     wireArrange();
     wireCheck();
     wireTodo();
+    wireQuickAdd();
 
     if (window.ResizeObserver) {
       new ResizeObserver(measureHeader).observe($('topbar'));

@@ -84,6 +84,17 @@
   </div>
 
   <main class="content">
+    <!-- Quick add: type what you want to look for. New items go to the top. -->
+    <form id="quick-add" class="quick-add" novalidate>
+      <label for="quick-add-name" class="quick-add-label">Add something to look for</label>
+      <div class="quick-add-row">
+        <input id="quick-add-name" type="text" maxlength="200" placeholder="e.g. seiko diver -solar"
+               autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" enterkeyhint="done">
+        <button type="submit" id="quick-add-btn" class="btn btn-primary">Add</button>
+      </div>
+      <button type="button" id="quick-add-more" class="btn-text quick-add-more">More options (price, condition…)</button>
+    </form>
+
     <div class="meta-row">
       <div class="field-inline">
         <label for="category-filter" class="sr-only">Category</label>

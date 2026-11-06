@@ -296,6 +296,23 @@ button { touch-action: manipulation; }
   max-width: 760px; margin: 0 auto;
   padding: 8px calc(12px + var(--sar)) calc(104px + var(--sab)) calc(12px + var(--sal));
 }
+/* Quick add box at the top of the list */
+.quick-add {
+  margin: 4px 0 12px; padding: 12px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
+  box-shadow: var(--shadow);
+}
+.quick-add-label { display: block; margin: 0 0 8px; font-weight: 700; }
+.quick-add-row { display: flex; gap: 8px; }
+.quick-add-row input {
+  flex: 1; min-width: 0; min-height: 48px; padding: 10px 12px;
+  font-size: 16px;   /* 16px stops iOS from zooming on focus */
+  background: var(--bg); border: 1px solid var(--border); border-radius: 12px; color: var(--text);
+}
+.quick-add-row .btn { min-height: 48px; padding: 0 20px; }
+.quick-add-more { margin: 4px 0 -8px -12px; font-size: 14px; }
+body.is-arranging .quick-add { display: none; }   /* nothing to add while arranging */
+
 .meta-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .field-inline { flex: 1 1 auto; min-width: 0; max-width: 260px; }
 .field-inline select { padding-right: 8px; }
@@ -530,8 +547,29 @@ body.is-arranging .fab { display: none; }   /* it would sit on top of the Top bu
 .check-bar::-webkit-progress-bar { background: var(--surface-2); }
 .check-bar::-webkit-progress-value { background: var(--btn); border-radius: 999px; }
 .check-bar::-moz-progress-bar { background: var(--btn); border-radius: 999px; }
-.check-next { font-size: 17px; overflow-wrap: anywhere; }
-.check-next .id { margin-left: 0; }
+/* "Just checked" row with High / Normal / Low */
+.check-last {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap;
+  margin: 0 0 8px; padding: 8px 10px;
+  background: var(--surface-2); border-radius: 12px;
+}
+.check-last-name { flex: 1 1 140px; min-width: 0; font-size: 14px; overflow-wrap: anywhere; }
+.check-prio { display: flex; gap: 6px; }
+.check-prio-btn {
+  min-height: 40px; padding: 0 12px;
+  border: 1px solid var(--border); border-radius: 10px;
+  background: var(--surface); color: var(--text);
+  font-weight: 700; font-size: 15px; cursor: pointer;
+}
+.check-prio-btn.is-on { background: var(--btn); border-color: var(--btn); color: var(--on-btn); }
+.check-prio-btn:disabled { opacity: .55; cursor: default; }
+
+/* The next item's name, big */
+.check-next-label {
+  font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted);
+}
+.check-name { font-size: 26px; font-weight: 800; line-height: 1.2; overflow-wrap: anywhere; }
+.check-name .id { margin-left: 2px; font-size: 15px; font-weight: 600; }
 .check-target, .check-hint { margin-top: 2px; font-size: 14px; color: var(--muted); }
 .check-done { font-size: 19px; font-weight: 800; }
 .check-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
