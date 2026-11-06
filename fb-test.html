@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>Facebook link test</title>
+<style>
+  /* Plain page, readable in light and dark mode. */
+  :root { color-scheme: light dark; --bg: #f3f4f6; --card: #fff; --text: #14181f; --muted: #566070;
+          --border: #d5dae1; --fb: #6b3fb0; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #0f1216; --card: #181c22; --text: #eceff3; --muted: #a0aab8; --border: #2f3742; --fb: #8b5fd6; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 16px; padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px));
+         background: var(--bg); color: var(--text); font: 17px/1.45 -apple-system, system-ui, sans-serif; }
+  main { max-width: 640px; margin: 0 auto; }
+  h1 { font-size: 24px; margin: 4px 0 8px; }
+  ol.steps { padding-left: 22px; margin: 8px 0 16px; }
+  ol.steps li { margin: 4px 0; }
+  label { display: block; font-weight: 600; margin: 16px 0 6px; }
+  input { width: 100%; font-size: 18px; padding: 12px; border: 1px solid var(--border); border-radius: 10px;
+          background: var(--card); color: var(--text); }
+  .hint { color: var(--muted); font-size: 14px; margin: 6px 0 0; }
+  .test { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 14px; margin: 14px 0; }
+  .test p { margin: 0 0 10px; }
+  .letter { display: inline-block; min-width: 30px; height: 30px; line-height: 30px; text-align: center;
+            border-radius: 8px; background: var(--fb); color: #fff; font-weight: 700; margin-right: 8px; }
+  a.btn { display: block; padding: 16px; border-radius: 12px; background: var(--fb); color: #fff;
+          text-decoration: none; font-weight: 600; text-align: center; font-size: 18px; }
+  .url { font: 12px/1.35 ui-monospace, Menlo, monospace; color: var(--muted); word-break: break-all; margin-top: 8px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Facebook link test</h1>
+  <p>Find which kind of link makes the Facebook app show the search words.</p>
+  <ol class="steps">
+    <li>Tap the button under <strong>A</strong>.</li>
+    <li>In the Facebook app, look at the search box: are your words in it, and do listings show?</li>
+    <li>Come back: tap <strong>◀ Safari</strong> in the top-left corner.</li>
+    <li>Do the same for B, C, D… Then tell Claude the letters that worked.</li>
+  </ol>
+
+  <label for="words">Search words</label>
+  <input id="words" type="text" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false">
+  <p class="hint">Saved on this phone only. Use something that surely has listings near you.</p>
+
+  <label for="loc">Facebook location ID</label>
+  <input id="loc" type="text" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false">
+  <p class="hint" id="loc-hint"></p>
+
+  <div id="tests"></div>
+</main>
+
+<script>
+(function () {
+  'use strict';
+
+  var WORDS_KEY = 'blf_fbtest_words';
+  var LOC_KEY = 'blf_fbtest_loc';
+  var APP_CACHE_KEY = 'blf_cache_v1';   // the main page's saved copy (same site)
+
+  var wordsEl = document.getElementById('words');
+  var locEl = document.getElementById('loc');
+  var locHint = document.getElementById('loc-hint');
+  var testsEl = document.getElementById('tests');
+
+  function load(key) { try { return localStorage.getItem(key) || ''; } catch (e) { return ''; } }
+  function save(key, v) { try { localStorage.setItem(key, v); } catch (e) { /* not fatal */ } }
+
+  // The location ID saved in Buy List Finder's Settings, if this phone has a copy.
+  function appLocation() {
+    try {
+      var c = JSON.parse(localStorage.getItem(APP_CACHE_KEY) || 'null');
+      var id = c && c.settings && c.settings.fb_location_id;
+      return id ? String(id).trim() : '';
+    } catch (e) { return ''; }
+  }
+
+  // Encoding helpers: %20 for spaces (what the app sends now), or + (like forms do).
+  function enc(s) { return encodeURIComponent(s); }
+  function encPlus(s) { return encodeURIComponent(s).replace(/%20/g, '+'); }
+
+  // Only letters, numbers, dot, dash and underscore are allowed in a location ID.
+  function cleanLoc(s) { return /^[A-Za-z0-9._-]{1,64}$/.test(s) ? s : ''; }
+
+  function addTest(letter, what, url) {
+    var box = document.createElement('div');
+    box.className = 'test';
+    var p = document.createElement('p');
+    var tag = document.createElement('span');
+    tag.className = 'letter';
+    tag.textContent = letter;
+    p.appendChild(tag);
+    p.appendChild(document.createTextNode(what));
+    var a = document.createElement('a');
+    a.className = 'btn';
+    a.href = url;                       // a real link: iOS only hands real taps to the app
+    a.textContent = 'Open ' + letter;
+    var u = document.createElement('div');
+    u.className = 'url';
+    u.textContent = url;
+    box.appendChild(p);
+    box.appendChild(a);
+    box.appendChild(u);
+    testsEl.appendChild(box);
+  }
+
+  function render() {
+    var words = wordsEl.value.replace(/\s+/g, ' ').trim() || 'road bike';
+    var loc = cleanLoc(locEl.value.trim());
+    var W = 'https://www.facebook.com/marketplace/';
+
+    testsEl.textContent = '';
+    addTest('A', 'What Buy List Finder sends now.', W + 'search/?query=' + enc(words));
+    addTest('B', 'Same, without the slash after "search".', W + 'search?query=' + enc(words));
+    addTest('C', 'Same as A, with + between words.', W + 'search/?query=' + encPlus(words));
+    addTest('D', 'The "category" search address.', W + 'category/search/?query=' + enc(words));
+    if (loc) {
+      addTest('E', 'With your location ID.', W + loc + '/search/?query=' + enc(words));
+      addTest('F', 'With your location ID, no slash after "search".', W + loc + '/search?query=' + enc(words));
+    }
+    addTest(loc ? 'G' : 'E', 'The mobile Facebook address.',
+      'https://m.facebook.com/marketplace/search/?query=' + enc(words));
+  }
+
+  wordsEl.value = load(WORDS_KEY);
+  var savedLoc = load(LOC_KEY);
+  var fromApp = appLocation();
+  locEl.value = savedLoc || fromApp;
+  locHint.textContent = fromApp ?
+    'Filled in from your Buy List Finder settings. Clear it to skip the location tests.' :
+    'Optional. The number after /marketplace/ in a Marketplace address. Leave empty to skip those tests.';
+
+  wordsEl.addEventListener('input', function () { save(WORDS_KEY, wordsEl.value.trim()); render(); });
+  locEl.addEventListener('input', function () { save(LOC_KEY, locEl.value.trim()); render(); });
+  render();
+})();
+</script>
+</body>
+</html>

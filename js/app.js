@@ -146,6 +146,34 @@
     return IS_IOS ? Links.buildFacebookAppUrl(item) : Links.buildFacebookUrl(item, settings);
   }
 
+  // iPhone/iPad: the Facebook app opens with an empty search (Nov 2026), so a
+  // tap on a Facebook link also copies the search words. In the app you tap
+  // the search box and Paste. The link itself still opens as usual.
+  function copyWordsOnTap(a, words) {
+    if (!IS_IOS || !a || !words) { return; }
+    a.addEventListener('click', function () { copyText(words); });
+  }
+
+  // Copies text. It must run during the tap itself: iOS only allows copying then.
+  function copyText(text) {
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).catch(function () { /* not fatal */ });
+        return;
+      }
+    } catch (e) { /* fall back below */ }
+    // Older browsers: copy from a hidden text box.
+    var ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    ta.style.position = 'fixed';
+    ta.style.top = '-1000px';
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); } catch (e) { /* not fatal */ }
+    document.body.removeChild(ta);
+  }
+
   // The only function that sets an href. `url` must come from a BuyLinks builder.
   function linkEl(url, className, kids) {
     var a = h('a', { 'class': className }, kids);
@@ -908,8 +936,8 @@
     return linkEl(url, cls, [h('span', null, label), sub ? h('span', { 'class': 'sub' }, sub) : null]);
   }
 
-  // iPhone only: the Facebook app keeps the words but drops the filters, so
-  // spell out what to set by hand.
+  // iPhone only: the Facebook app opens with an empty search and no filters,
+  // so say that the words are copied and spell out what to set by hand.
   function fbAppHint(item, settings) {
     var parts = ['Newest first'];
     var lo = num(item.min_price);
@@ -922,7 +950,7 @@
     var miles = num(item.distance_mi);
     if (miles === null || miles <= 0) { miles = num(settings && settings.default_fb_radius_mi); }
     if (miles !== null && miles > 0) { parts.push('within ' + miles + ' mi'); }
-    return 'In the app, set: ' + parts.join(' \u00b7 ');
+    return 'Tapping copies the search words. In the app, tap Search and Paste. Then set: ' + parts.join(' \u00b7 ');
   }
 
   function linksSection(item, settings) {
@@ -938,6 +966,7 @@
     if (sites.indexOf('facebook') !== -1) {
       var fbUrl = facebookUrl(item, settings);
       var fbBtn = linkButton(fbUrl, 'Facebook', 'Marketplace, newest first', 'fb');
+      if (fbUrl) { copyWordsOnTap(fbBtn, Links.facebookWords(item)); }
       if (IS_IOS && fbUrl) {
         wrap.appendChild(h('div', { 'class': 'link-group' }, fbBtn,
           h('p', { 'class': 'hint fb-hint' }, fbAppHint(item, settings))));
@@ -961,6 +990,7 @@
     var link = url ?
       linkEl(url, 'alert-link', label) :
       h('a', { 'class': 'alert-link is-disabled', 'aria-disabled': 'true', role: 'link' }, label);
+    if (url && site === 'facebook') { copyWordsOnTap(link, Links.facebookWords(item)); }
 
     var cb = h('input', { type: 'checkbox', 'data-fk': 'alert:' + item.id + ':' + field });
     cb.checked = !!item[field];
@@ -1216,6 +1246,7 @@
       // the sheet and lets the browser follow the link as usual.
       var a = linkEl(sweepUrl(site, items[0]), 'linkbtn check-option ' + (site === 'ebay' ? 'ebay' : 'fb'),
         [h('span', null, label), h('span', { 'class': 'sub' }, sub)]);
+      if (site === 'facebook') { copyWordsOnTap(a, Links.facebookWords(items[0])); }
       a.addEventListener('click', function () { startSweep(site, ids); });
       box.appendChild(a);
     });
@@ -1242,6 +1273,7 @@
       id: String(item.id),
       target: t ? 'Target ' + money(t.value) + ' (' + t.label + ')' : 'No target',
       hint: (sw.site === 'facebook' && IS_IOS) ? fbAppHint(item, state.settings || {}) : '',
+      words: (sw.site === 'facebook' && IS_IOS) ? Links.facebookWords(item) : '',
       url: stepUrl(sw, sw.index)
     };
   }
@@ -1279,8 +1311,10 @@
     if (v.hint) { inner.appendChild(h('p', { 'class': 'check-hint' }, v.hint)); }
 
     // The main button comes first: one tap per item.
+    var openNext = checkLink(v.url, 'Open next', 'chk:open', 'btn-primary');
+    copyWordsOnTap(openNext, v.words);
     inner.appendChild(h('div', { 'class': 'check-actions' },
-      checkLink(v.url, 'Open next', 'chk:open', 'btn-primary'),
+      openNext,
       checkButton('Skip', 'chk:skip', '', skipSweep),
       checkButton('Stop', 'chk:stop', '', stopSweep)));
     return inner;

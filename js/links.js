@@ -361,6 +361,8 @@
     buildEbayEndingUrl: buildEbayEndingUrl,
     buildFacebookUrl: buildFacebookUrl,
     buildFacebookAppUrl: buildFacebookAppUrl,
+    // The words a Facebook search uses ('' if there are none), for copying.
+    facebookWords: function (item) { return canSearch(item) ? facebookQuery(item) : ''; },
     ebayCategoryId: ebayCategoryId
   };
 })(typeof window !== 'undefined' ? window : this);

@@ -26,7 +26,7 @@ Your list stays in exactly the order you choose. Each row starts with its number
 
 It is one tap per item on purpose. On iPhone, eBay and Facebook only open their app when you really tap a link. A page that opens a link by itself (a timer) lands in a browser where you are not signed in. So there is no auto-open.
 
-On iPhone the Facebook app drops the filters, so for Facebook the panel repeats what to set by hand. To get your best items first, arrange the list or use the High priority chip before you start.
+On iPhone the Facebook app opens with an empty search and drops the filters. So tapping a Facebook link also copies the search words: in the app, tap the search box and Paste. The panel repeats what to set by hand. To get your best items first, arrange the list or use the High priority chip before you start.
 
 **To do.** The **To do** button opens a small checklist for the things you want to do next. Type something, tap **Add**, tick it when it's done, and **Clear finished** removes the ticked ones. It is saved on the device you use, not in the database, so a different phone or browser has its own list.
 
@@ -48,6 +48,7 @@ On iPhone the Facebook app drops the filters, so for Facebook the panel repeats 
 - `js/app.js`: the page's behaviour, showing items and handling buttons.
 - `supabase/migrations/`: the database setup (tables and security rules), applied in order.
 - `tests/`: automatic tests for `js/links.js`. `tests/run.sh` runs them.
+- `fb-test.html`: a test page for iPhone with several versions of a Facebook Marketplace link, to find one the Facebook app accepts.
 - `manifest.webmanifest`, `icon.png`, `icon-512.png`: the home-screen icon and app settings.
 - `data/`: personal import files. `.gitignore` keeps it out of GitHub.
 
@@ -59,6 +60,8 @@ On iPhone the Facebook app drops the filters, so for Facebook the panel repeats 
 4. Tap a few item buttons on your iPhone. The tests only check how links are built. They can't tell whether eBay or Facebook still accept them.
 
 What the iPhone test showed (Nov 2026): the eBay app keeps every filter from the link. The Facebook app searches the words but drops the filters, which is why the page shows a "set these in the app" hint under the Facebook button. Once a Facebook location ID was added in Settings, the Facebook app opened the search but showed no listings. So on iPhone and iPad the Facebook link now carries the search words only, with no location and no filters. The app searches around the location set inside the Facebook app. A computer still gets the full link.
+
+Later the same day the Facebook app also stopped taking the search words: it opened Marketplace with an empty search ("nothing found"). Until a link form that works is found, every Facebook link on iPhone and iPad also copies the search words when tapped. To find a link the app accepts, open `fb-test.html` on the iPhone (the site address plus `/fb-test.html`) and tap each test link.
 
 ## Run the tests
 

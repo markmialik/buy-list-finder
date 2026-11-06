@@ -519,6 +519,12 @@ test('Facebook app link: drops minus words and quote marks like the full link', 
   assertNotContains(fb, 'used', 'no exclusion word');
 });
 
+test('Facebook words for copying: same words as the link, empty when none', function () {
+  assertEqual(BL.facebookWords({ name: 'knipex “97 01 125” -used' }), 'knipex 97 01 125', 'words');
+  assertEqual(BL.facebookWords({ name: '-solar' }), '', 'only minus words');
+  assertEqual(BL.facebookWords(null), '', 'no item');
+});
+
 test('Facebook app link: null when there is nothing to search', function () {
   [null, {}, { name: '' }, { name: '-solar' }].forEach(function (item) {
     assertNull(BL.buildFacebookAppUrl(item), 'app link for ' + show(item));
