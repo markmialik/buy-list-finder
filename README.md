@@ -16,15 +16,19 @@ Each link carries the item's details: search words, price range, condition, cate
 
 Distance only applies to Facebook: it uses the item's distance, or a default radius if the item has none. eBay always searches nationwide, because everything there ships.
 
-## Arrange and Quick check
+## Arrange, Quick check and To do
 
 Your list stays in exactly the order you choose. Each row starts with its number in the whole list (1, 2, 3...). New items go to the end.
 
 **Arrange.** Tap **Arrange** in the top bar to change the order. Each row then shows a big number and three buttons: **▲** and **▼** move the item one place, **Top** moves it to the front. Tap the number to type the place you want instead. Filters and search still work while you arrange. A move counts places among the items you can see, so hidden items never jump over each other. They stay where they were. Your change is saved a moment after your last tap, and again when you tap **Done** or leave the page. If a save fails you get a message and the list goes back to what is saved.
 
-**Quick check.** Tap **▶ Check** to go through the items shown, one by one, in list order, starting at the top. Pick **eBay newest** or **Facebook**. Only items that can be searched on that site are included, and the button shows how many. The first search opens straight away. When you come back to the page, a panel at the bottom shows the next item, counts down about 2 seconds and opens it for you. You can tap **Skip**, **Open now** or **Stop**. If you leave during the countdown, it waits and shows **Continue**. Your place is remembered on the device for 12 hours. On a computer there is no countdown, because the browser would block the new tabs. Tap **Open** for each item instead.
+**Quick check.** Tap **▶ Check** to go through the items shown, one by one, in list order, starting at the top. Pick **eBay newest** or **Facebook**. Only items that can be searched on that site are included, and the button shows how many. The first search opens straight away. When you come back to the page, a panel at the bottom shows the next item. Tap **Open next** to open it, and repeat. You can also tap **Skip** or **Stop**. Your place is remembered on the device for 12 hours.
+
+It is one tap per item on purpose. On iPhone, eBay and Facebook only open their app when you really tap a link. A page that opens a link by itself (a timer) lands in a browser where you are not signed in. So there is no auto-open.
 
 On iPhone the Facebook app drops the filters, so for Facebook the panel repeats what to set by hand. To get your best items first, arrange the list or use the High priority chip before you start.
+
+**To do.** The **To do** button opens a small checklist for the things you want to do next. Type something, tap **Add**, tick it when it's done, and **Clear finished** removes the ticked ones. It is saved on the device you use, not in the database, so a different phone or browser has its own list.
 
 ## How it works
 

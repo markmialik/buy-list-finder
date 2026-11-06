@@ -63,6 +63,7 @@
       <div class="topbar-actions" id="topbar-actions">
         <button type="button" id="btn-check" class="btn">&#9654; Check</button>
         <button type="button" id="btn-arrange" class="btn">Arrange</button>
+        <button type="button" id="btn-todo" class="btn">To do</button>
       </div>
       <div class="chips" id="chips" role="group" aria-label="Filters">
         <button type="button" class="chip" data-status="hunting" aria-pressed="true">Hunting</button>
@@ -313,6 +314,26 @@
     <p>Goes through the items shown, in order, starting at the top.</p>
     <div id="check-options" class="check-options"></div>
     <p class="hint">Arrange your list or use the High priority chip so your top items come first.</p>
+  </div>
+</dialog>
+
+<!-- ============ To do next ============ -->
+<dialog id="todo-sheet" class="sheet" aria-labelledby="todo-title">
+  <div class="sheet-head">
+    <h2 id="todo-title">To do next</h2>
+    <button type="button" id="todo-x" class="icon-btn" aria-label="Close the to-do list">&times;</button>
+  </div>
+  <div class="sheet-scroll">
+    <form id="todo-form" class="todo-form" novalidate>
+      <label for="todo-input" class="sr-only">Add something to do next</label>
+      <input id="todo-input" type="text" maxlength="200" autocomplete="off" enterkeyhint="done"
+             placeholder="Add something to do next">
+      <button type="submit" class="btn btn-primary">Add</button>
+    </form>
+    <ul id="todo-list" class="todo-list"></ul>
+    <p id="todo-empty" class="muted">Nothing here yet. Add the things you want to do next.</p>
+    <button type="button" id="todo-clear" class="btn btn-block" hidden>Clear finished</button>
+    <p class="hint">Saved on this device only.</p>
   </div>
 </dialog>
 

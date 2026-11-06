@@ -486,6 +486,27 @@ body.is-arranging .fab { display: none; }   /* it would sit on top of the Top bu
 .toast.is-error { background: var(--danger); color: #fff; }
 @media (prefers-color-scheme: dark) { .toast.is-error { background: #b3261e; } }
 
+/* ---------- To do next ---------- */
+
+.todo-form { display: flex; gap: 8px; margin: 0 0 14px; }
+.todo-form input {
+  flex: 1; min-width: 0; min-height: 44px; padding: 10px 12px;
+  font-size: 16px;   /* 16px stops iOS from zooming on focus */
+  background: var(--surface); border: 1px solid var(--border); border-radius: 12px; color: var(--text);
+}
+.todo-list { list-style: none; margin: 0 0 12px; padding: 0; }
+.todo-item {
+  display: flex; align-items: center; gap: 4px;
+  margin: 0 0 8px; padding: 0 4px 0 12px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+}
+.todo-item .check { flex: 1; min-width: 0; padding: 6px 0; }
+.todo-text { overflow-wrap: anywhere; }
+.todo-item.is-done .todo-text { color: var(--muted); text-decoration: line-through; }
+.todo-del { color: var(--muted); }
+#todo-empty { margin: 4px 0 12px; }
+#todo-empty[hidden] { display: none; }
+
 /* ---------- Quick check panel ---------- */
 
 .check-panel {
@@ -512,11 +533,10 @@ body.is-arranging .fab { display: none; }   /* it would sit on top of the Top bu
 .check-next { font-size: 17px; overflow-wrap: anywhere; }
 .check-next .id { margin-left: 0; }
 .check-target, .check-hint { margin-top: 2px; font-size: 14px; color: var(--muted); }
-.check-count { margin-top: 6px; font-size: 17px; font-weight: 800; }
 .check-done { font-size: 19px; font-weight: 800; }
-.check-actions { display: flex; gap: 8px; margin-top: 10px; }
-.check-actions .btn { flex: 1 1 0; min-height: 48px; padding: 0 8px; }
-.check-actions .btn-primary { flex-grow: 1.5; }
+.check-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
+.check-actions .btn { min-height: 48px; padding: 0 8px; }
+.check-actions .btn-primary { grid-column: 1 / -1; min-height: 56px; font-size: 18px; }
 
 body.has-check-panel .content { padding-bottom: calc(var(--check-h, 0px) + 104px + var(--sab)); }
 body.has-check-panel .fab { bottom: calc(var(--check-h, 0px) + 16px); }

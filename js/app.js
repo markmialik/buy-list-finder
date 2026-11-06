@@ -9,8 +9,9 @@
  *   - The only href values ever set are straight from the BuyLinks builders
  *     (see linkEl()).
  *   - Values used as class names go through oneOf() whitelists.
- *   - The only script navigation is navigateTo() (Quick check auto-open), and
- *     it only accepts an eBay or Facebook address.
+ *   - No script navigation to eBay / Facebook: iOS only hands a link to the
+ *     eBay / Facebook app when you really tap it, so Quick check always asks
+ *     for a tap (see "Open next").
  */
 (function () {
   'use strict';
@@ -33,8 +34,9 @@
   var ORDER_SAVE_DELAY_MS = 500;           // quick taps in Arrange mode make one save
   var SWEEP_KEY = 'blf_sweep_v1';          // Quick check progress
   var SWEEP_MAX_AGE_MS = 12 * 60 * 60 * 1000;
-  var CHECK_COUNTDOWN_MS = 2000;           // iPhone auto-open delay
-  var CHECK_AUTO_RESUME_MS = 10 * 60 * 1000; // back after longer than this: wait for Continue
+  var TODO_KEY = 'blf_todo_v1';            // "To do next" list, kept on this device
+  var TODO_MAX = 200;
+  var TODO_TEXT_MAX = 200;
 
   var state = {
     items: [],
@@ -149,17 +151,6 @@
     return a;
   }
 
-  // The ONLY script navigation: Quick check auto-open on iPhone/iPad. It is
-  // one small function so tests can replace it (window.BuyListApp.navigateTo).
-  // It still refuses anything that is not an eBay or Facebook address.
-  var app = window.BuyListApp = {
-    navigateTo: function (url) {
-      if (!/^https:\/\/www\.(ebay|facebook)\.com\//.test(String(url))) { return; }
-      window.location.href = url;
-    }
-  };
-  function navigateTo(url) { app.navigateTo(url); }
-
   // ---------------------------------------------------------------------------
   // Cache (localStorage)
   // ---------------------------------------------------------------------------
@@ -221,7 +212,7 @@
   }
 
   function closeAllDialogs() {
-    ['editor', 'settings', 'confirm', 'check-sheet', 'move-dialog'].forEach(function (id) {
+    ['editor', 'settings', 'confirm', 'check-sheet', 'move-dialog', 'todo-sheet'].forEach(function (id) {
       var d = $(id);
       if (d.open) { d.close(); }
     });
@@ -229,7 +220,7 @@
 
   function syncModalClass() {
     var any = $('editor').open || $('settings').open || $('confirm').open ||
-      $('check-sheet').open || $('move-dialog').open;
+      $('check-sheet').open || $('move-dialog').open || $('todo-sheet').open;
     document.body.classList.toggle('modal-open', any);
   }
 
@@ -244,7 +235,6 @@
     state.expandedId = null;
     state.arrange = false;
     resetOrderSave();
-    cancelCountdown();
     clearSweepStorage();
     clearCache();
     closeAllDialogs();
@@ -1041,18 +1031,20 @@
   //
   // Progress lives in localStorage (SWEEP_KEY), not in memory, because the
   // page is put to sleep (or reloaded) while eBay / Facebook is in front.
-  //   phase 'away'      we opened a search; waiting for you to come back
-  //   phase 'countdown' the panel shows the next item (iPhone: counting down)
-  //   phase 'paused'    the countdown was interrupted; tap Continue
-  //   phase 'done'      every item has been visited
+  //   phase 'away'  we sent you to a search; waiting for you to come back
+  //   phase 'ready' the panel shows the next item; tap "Open next"
+  //   phase 'done'  every item has been visited
   // Coming back (visible again, pageshow, or app start) while 'away' moves on
   // to the next item. Those events can fire together, so every step is driven
-  // by the stored phase: the second event sees 'countdown' and does nothing.
+  // by the stored phase: the second event sees 'ready' and does nothing.
+  //
+  // There is deliberately no auto-open. iOS only hands a link to the eBay /
+  // Facebook app when you tap it; a link opened by a timer (script) lands in a
+  // browser where you are not signed in. So each item is one tap on a real link.
   // ---------------------------------------------------------------------------
   var SWEEP_SITES = ['ebay', 'facebook'];
-  var SWEEP_PHASES = ['away', 'countdown', 'paused', 'done'];
+  var SWEEP_PHASES = ['away', 'ready', 'done'];
   var SWEEP_MAX_IDS = 5000;
-  var countdown = { timer: null, tick: null, endsAt: 0 };
   var lastPanelSig = null;
 
   function isInt(v) { return typeof v === 'number' && isFinite(v) && Math.floor(v) === v; }
@@ -1073,6 +1065,8 @@
     if (!raw) { return null; }
     var sw = null;
     try { sw = JSON.parse(raw); } catch (e) { sw = null; }
+    // An older version also saved 'countdown' and 'paused': both mean "ready" now.
+    if (sw && (sw.phase === 'countdown' || sw.phase === 'paused')) { sw.phase = 'ready'; }
     var ok = !!sw && typeof sw === 'object' &&
       SWEEP_SITES.indexOf(sw.site) !== -1 &&
       SWEEP_PHASES.indexOf(sw.phase) !== -1 &&
@@ -1107,79 +1101,15 @@
 
   function stepUrl(sw, i) { return sweepUrl(sw.site, itemById(sw.ids[i])); }
 
-  // --- countdown timer ------------------------------------------------------
-  function cancelCountdown() {
-    clearTimeout(countdown.timer);
-    clearInterval(countdown.tick);
-    countdown.timer = null;
-    countdown.tick = null;
-  }
-
-  function startCountdown() {
-    cancelCountdown();
-    countdown.endsAt = Date.now() + CHECK_COUNTDOWN_MS;
-    countdown.timer = setTimeout(fireCountdown, CHECK_COUNTDOWN_MS);
-    countdown.tick = setInterval(updateCountdownText, 250);
-    renderToolbar();
-    renderCheckPanel(true);
-  }
-
-  function updateCountdownText() {
-    var el = $('check-count');
-    if (!el) { return; }
-    var left = Math.max(1, Math.ceil((countdown.endsAt - Date.now()) / 1000));
-    el.textContent = 'Opening in ' + left + '…';
-  }
-
-  // The countdown ran out: open the search (iPhone/iPad only). The stored
-  // phase goes to 'away' first, so this can never open twice for one return.
-  function fireCountdown() {
-    cancelCountdown();
-    var sw = readSweep();
-    if (!sw || sw.phase !== 'countdown' || !IS_IOS) { return; }
-    if (document.visibilityState !== 'visible') { pauseCountdown(); return; }
-    var url = stepUrl(sw, sw.index);
-    if (!url) { sw.index += 1; settleSweep(sw, true); return; }   // item was deleted or edited meanwhile
-    sw.phase = 'away';
-    sw.awayAt = Date.now();
-    sw.opened += 1;
-    writeSweep(sw);
-    renderToolbar();
-    renderCheckPanel();
-    navigateTo(url);
-  }
-
-  // The page went to the background while counting: stop and wait.
-  function pauseCountdown() {
-    if (!countdown.timer) { return; }
-    cancelCountdown();
-    var sw = readSweep();
-    if (sw && sw.phase === 'countdown') {
-      sw.phase = 'paused';
-      writeSweep(sw);
-    }
-    renderToolbar();
-    renderCheckPanel();
-  }
-
   // --- moving through the list ---------------------------------------------
   // Skip over ids that no longer exist or can't be searched; then either show
-  // the next item (counting down if `count` and on iPhone) or finish.
-  function settleSweep(sw, count) {
+  // the next item or finish.
+  function settleSweep(sw) {
     while (sw.index < sw.ids.length && !stepUrl(sw, sw.index)) { sw.index += 1; }
-    if (sw.index >= sw.ids.length) {
-      cancelCountdown();
-      sw.phase = 'done';
-    } else {
-      sw.phase = 'countdown';
-    }
+    sw.phase = sw.index >= sw.ids.length ? 'done' : 'ready';
     writeSweep(sw);
-    if (sw.phase === 'countdown' && count && IS_IOS) {
-      startCountdown();
-    } else {
-      renderToolbar();
-      renderCheckPanel();
-    }
+    renderToolbar();
+    renderCheckPanel();
   }
 
   // Called when the page is visible again or just started.
@@ -1188,10 +1118,7 @@
     var sw = readSweep();
     if (sw && sw.phase === 'away') {
       sw.index += 1;           // the item we sent you to is done; on to the next
-      // Only auto-open if you're coming straight back; after a long break
-      // (or an unknown one), show the panel and wait for Continue.
-      var quickReturn = typeof sw.awayAt === 'number' && Date.now() - sw.awayAt <= CHECK_AUTO_RESUME_MS;
-      settleSweep(sw, quickReturn);
+      settleSweep(sw);
       return;
     }
     renderToolbar();
@@ -1207,24 +1134,28 @@
       var sw = readSweep();
       if (sw && sw.phase === 'away') {
         sw.index += 1;
-        settleSweep(sw, false);
+        settleSweep(sw);
       }
     }, 0);
   }
 
+  // Redraw after a link click, one tick later: the link's own navigation (the
+  // hand-off to the app) must start before anything on the page changes.
+  function afterLinkClick(fn) { setTimeout(fn, 0); }
+
   function startSweep(site, ids) {
-    cancelCountdown();
     var now = Date.now();
-    writeSweep({ site: site, ids: ids.slice(), index: 0, phase: 'away', startedAt: now, awayAt: now, opened: 1 });
-    closeCheckSheet();
-    renderToolbar();
-    renderCheckPanel();
+    writeSweep({ site: site, ids: ids.slice(), index: 0, phase: 'away', startedAt: now, opened: 1 });
+    afterLinkClick(function () {
+      closeCheckSheet();
+      renderToolbar();
+      renderCheckPanel();
+    });
     advanceAfterDesktopOpen();
   }
 
   function stopSweep() {
     var sw = readSweep();
-    cancelCountdown();
     clearSweepStorage();
     renderToolbar();
     renderCheckPanel();
@@ -1233,32 +1164,23 @@
 
   function skipSweep() {
     var sw = readSweep();
-    if (!sw || (sw.phase !== 'countdown' && sw.phase !== 'paused')) { return; }
-    cancelCountdown();
+    if (!sw || sw.phase !== 'ready') { return; }
     sw.index += 1;
-    settleSweep(sw, true);
+    settleSweep(sw);
   }
 
-  function continueSweep() {
-    var sw = readSweep();
-    if (!sw || (sw.phase !== 'countdown' && sw.phase !== 'paused') || !IS_IOS) { return; }
-    sw.phase = 'countdown';
-    writeSweep(sw);
-    startCountdown();
-  }
-
-  // Click on "Open now" / "Open". These are real links, so this must not
-  // preventDefault: it only records that we are going away.
+  // Click on "Open next". This is a real link, so this must not preventDefault:
+  // it only records that we are going away.
   function markOpened() {
     var sw = readSweep();
-    if (!sw || (sw.phase !== 'countdown' && sw.phase !== 'paused')) { return; }
-    cancelCountdown();
+    if (!sw || sw.phase !== 'ready') { return; }
     sw.phase = 'away';
-    sw.awayAt = Date.now();
     sw.opened += 1;
     writeSweep(sw);
-    renderToolbar();
-    renderCheckPanel();
+    afterLinkClick(function () {
+      renderToolbar();
+      renderCheckPanel();
+    });
     advanceAfterDesktopOpen();
   }
 
@@ -1305,7 +1227,7 @@
     if (!item) { return null; }
     var t = effectiveTarget(item);
     return {
-      mode: !IS_IOS ? 'manual' : (countdown.timer ? 'counting' : 'paused'),
+      mode: 'ready',
       site: sw.site,
       n: sw.index + 1,
       total: sw.ids.length,
@@ -1349,24 +1271,11 @@
     inner.appendChild(h('p', { 'class': 'check-target' }, v.target));
     if (v.hint) { inner.appendChild(h('p', { 'class': 'check-hint' }, v.hint)); }
 
-    var stop = checkButton('Stop', 'chk:stop', '', stopSweep);
-    var actions = h('div', { 'class': 'check-actions' });
-    if (v.mode === 'counting') {
-      inner.appendChild(h('p', { 'class': 'check-count', id: 'check-count', 'aria-live': 'off' }, 'Opening in 2…'));
-      actions.appendChild(stop);
-      actions.appendChild(checkButton('Skip', 'chk:skip', '', skipSweep));
-      actions.appendChild(checkLink(v.url, 'Open now', 'chk:open', 'btn-primary'));
-    } else if (v.mode === 'paused') {
-      inner.appendChild(h('p', { 'class': 'check-count', id: 'check-count' }, 'Paused. Tap Continue to open it.'));
-      actions.appendChild(stop);
-      actions.appendChild(checkLink(v.url, 'Open now', 'chk:open', ''));
-      actions.appendChild(checkButton('Continue', 'chk:continue', 'btn-primary', continueSweep));
-    } else {   // desktop: no countdown (popup blockers), you open each one yourself
-      actions.appendChild(stop);
-      actions.appendChild(checkButton('Skip', 'chk:skip', '', skipSweep));
-      actions.appendChild(checkLink(v.url, 'Open', 'chk:open', 'btn-primary'));
-    }
-    inner.appendChild(actions);
+    // The main button comes first: one tap per item.
+    inner.appendChild(h('div', { 'class': 'check-actions' },
+      checkLink(v.url, 'Open next', 'chk:open', 'btn-primary'),
+      checkButton('Skip', 'chk:skip', '', skipSweep),
+      checkButton('Stop', 'chk:stop', '', stopSweep)));
     return inner;
   }
 
@@ -1381,21 +1290,19 @@
   // refresh, or the editor): move on to the next one that can be searched.
   function fixShownStep() {
     var sw = readSweep();
-    if (!sw || (sw.phase !== 'countdown' && sw.phase !== 'paused')) { return; }
+    if (!sw || sw.phase !== 'ready') { return; }
     if (sw.index >= sw.ids.length || stepUrl(sw, sw.index)) { return; }
-    var wasCounting = !!countdown.timer;
-    cancelCountdown();
     sw.index += 1;
-    settleSweep(sw, wasCounting);
+    settleSweep(sw);
   }
 
-  // Rebuilds the panel only when what it shows has changed (not on every tick).
+  // Rebuilds the panel only when what it shows has changed.
   function renderCheckPanel(force) {
     var panel = $('check-panel');
     if (state.loaded) { fixShownStep(); }
     var v = state.loaded ? checkView() : null;
     if (!v) {
-      // Only hide it: a link inside (Open now) may be the one being clicked right now.
+      // Only hide it: a link inside (Open next) may be the one being clicked right now.
       lastPanelSig = null;
       panel.hidden = true;
       document.body.classList.remove('has-check-panel');
@@ -1417,13 +1324,113 @@
       var again = panel.querySelector('[data-fk="' + String(fk).replace(/"/g, '') + '"]');
       if (again) { again.focus({ preventScroll: true }); }
     }
-    if (v.mode === 'counting') { updateCountdownText(); }
   }
 
   function wireCheck() {
     $('btn-check').addEventListener('click', openCheckSheet);
     $('check-sheet-x').addEventListener('click', closeCheckSheet);
     $('check-sheet').addEventListener('close', syncModalClass);
+  }
+
+  // ---------------------------------------------------------------------------
+  // To do next: a small checklist for yourself, kept on this device only
+  // (localStorage). Everything typed here is shown with textContent.
+  // ---------------------------------------------------------------------------
+  var todos = [];   // [{ id, text, done }] in the order you added them
+
+  function newTodoId() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+
+  function loadTodos() {
+    var out = [];
+    try {
+      var list = JSON.parse(localStorage.getItem(TODO_KEY) || '[]');
+      if (Array.isArray(list)) {
+        list.slice(0, TODO_MAX).forEach(function (t) {
+          if (t && typeof t.text === 'string' && t.text.trim() !== '') {
+            out.push({ id: str(t.id) || newTodoId(), text: t.text.slice(0, TODO_TEXT_MAX), done: t.done === true });
+          }
+        });
+      }
+    } catch (e) { out = []; }
+    todos = out;
+  }
+
+  function saveTodos() {
+    try { localStorage.setItem(TODO_KEY, JSON.stringify(todos)); }
+    catch (e) { toast("Couldn't save the list on this device.", true); }
+  }
+
+  function renderTodos() {
+    var open = todos.filter(function (t) { return !t.done; }).length;
+    $('btn-todo').textContent = open ? 'To do (' + open + ')' : 'To do';
+
+    var list = $('todo-list');
+    clear(list);
+    todos.forEach(function (t) {
+      var cb = h('input', { type: 'checkbox', 'data-fk': 'todo-cb:' + t.id });
+      cb.checked = t.done;
+      cb.addEventListener('change', function () {
+        t.done = cb.checked;
+        saveTodos();
+        renderTodos();
+        focusTodo('todo-cb:' + t.id);
+      });
+      var del = h('button', {
+        type: 'button', 'class': 'icon-btn todo-del', 'data-fk': 'todo-del:' + t.id,
+        'aria-label': 'Delete: ' + t.text
+      }, '×');
+      del.addEventListener('click', function () {
+        todos = todos.filter(function (x) { return x.id !== t.id; });
+        saveTodos();
+        renderTodos();
+        $('todo-input').focus();
+      });
+      list.appendChild(h('li', { 'class': 'todo-item' + (t.done ? ' is-done' : '') },
+        h('label', { 'class': 'check' }, cb, h('span', { 'class': 'todo-text' }, t.text)),
+        del));
+    });
+    $('todo-empty').hidden = todos.length > 0;
+    $('todo-clear').hidden = !todos.some(function (t) { return t.done; });
+  }
+
+  function focusTodo(fk) {
+    var el = $('todo-list').querySelector('[data-fk="' + String(fk).replace(/"/g, '') + '"]');
+    if (el) { el.focus({ preventScroll: true }); }
+  }
+
+  function addTodo(ev) {
+    ev.preventDefault();
+    var input = $('todo-input');
+    var text = input.value.trim().replace(/\s+/g, ' ');
+    if (!text) { input.value = ''; input.focus(); return; }
+    if (todos.length >= TODO_MAX) { toast('The list is full. Delete some first.', true); return; }
+    todos.push({ id: newTodoId(), text: text.slice(0, TODO_TEXT_MAX), done: false });
+    input.value = '';
+    saveTodos();
+    renderTodos();
+    input.focus();   // ready for the next one
+  }
+
+  function openTodo() {
+    renderTodos();
+    $('todo-sheet').showModal();
+    syncModalClass();
+    $('todo-sheet').querySelector('.sheet-scroll').scrollTop = 0;
+    if (todos.length === 0) { $('todo-input').focus(); }
+  }
+
+  function wireTodo() {
+    loadTodos();
+    renderTodos();
+    $('btn-todo').addEventListener('click', openTodo);
+    $('todo-x').addEventListener('click', function () { $('todo-sheet').close(); });
+    $('todo-sheet').addEventListener('close', syncModalClass);
+    $('todo-form').addEventListener('submit', addTodo);
+    $('todo-clear').addEventListener('click', function () {
+      todos = todos.filter(function (t) { return !t.done; });
+      saveTodos();
+      renderTodos();
+    });
   }
 
   // ---------------------------------------------------------------------------
@@ -2100,6 +2107,7 @@
     wireSettings();
     wireArrange();
     wireCheck();
+    wireTodo();
 
     if (window.ResizeObserver) {
       new ResizeObserver(measureHeader).observe($('topbar'));
@@ -2109,7 +2117,6 @@
     document.addEventListener('visibilitychange', function () {
       if (document.visibilityState === 'hidden') {
         flushOrderSave();     // leaving the page: don't lose a move that is still waiting
-        pauseCountdown();
       } else if (document.visibilityState === 'visible') {
         if (state.userId && Date.now() - state.lastRefresh > REFRESH_AFTER_MS) { refresh(); }
         resumeSweep();
@@ -2117,7 +2124,7 @@
     });
     // pageshow also fires when Safari restores the page from its back/forward cache.
     window.addEventListener('pageshow', function () { resumeSweep(); });
-    window.addEventListener('pagehide', function () { flushOrderSave(); pauseCountdown(); });
+    window.addEventListener('pagehide', function () { flushOrderSave(); });
 
     try {
       DB.init();
