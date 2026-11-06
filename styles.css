@@ -250,6 +250,9 @@ button { touch-action: manipulation; }
 .search { flex: 1; min-width: 0; }
 .search input { -webkit-appearance: none; appearance: none; }
 
+.topbar-actions { display: flex; gap: 8px; margin-top: 8px; }
+.topbar-actions .btn { flex: 1 1 0; padding: 0 12px; }
+
 .chips {
   display: flex; gap: 8px; align-items: center;
   overflow-x: auto;
@@ -336,12 +339,51 @@ button { touch-action: manipulation; }
   background: var(--surface-2);
   font-size: 12px; font-weight: 600;
 }
+.pos {
+  flex: none; min-width: 2ch;
+  color: var(--muted);
+  font-size: 13px; font-weight: 700; text-align: right;
+  font-variant-numeric: tabular-nums;
+}
 .chev {
   flex: none; width: 28px; text-align: center;
   color: var(--muted); font-size: 22px; line-height: 1;
   transition: transform .15s ease;
 }
 .row[aria-expanded="true"] .chev { transform: rotate(90deg); }
+
+/* ---------- Arrange mode ---------- */
+
+.arrange-hint { margin: 8px 2px 0; font-size: 14px; color: var(--muted); }
+.item.arrange { scroll-margin-bottom: 24px; }
+body.is-arranging .fab { display: none; }   /* it would sit on top of the Top buttons */
+.arr-row {
+  display: flex; align-items: center; gap: 8px;
+  min-height: 64px;
+  padding: 8px;
+}
+.arr-pos {
+  flex: none; min-width: 52px; height: 48px; padding: 0 6px;
+  border: 1px solid var(--border); border-radius: 12px;
+  background: var(--surface-2);
+  font-size: 22px; font-weight: 800; line-height: 1;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.arr-name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.arr-name .name { font-size: 16px; }
+.arr-btns { flex: none; display: flex; gap: 6px; }
+.arr-btn {
+  min-width: 44px; height: 44px; padding: 0 6px;
+  border: 1px solid var(--border); border-radius: 10px;
+  background: var(--surface);
+  font-size: 16px; font-weight: 700; line-height: 1;
+  cursor: pointer;
+}
+.arr-top { min-width: 48px; }
+.arr-btn:disabled { opacity: .35; cursor: default; }
+.item.is-paused > .arr-row,
+.item.is-bought > .arr-row { opacity: .62; }
 
 /* ---------- Expanded card ---------- */
 
@@ -444,6 +486,42 @@ button { touch-action: manipulation; }
 .toast.is-error { background: var(--danger); color: #fff; }
 @media (prefers-color-scheme: dark) { .toast.is-error { background: #b3261e; } }
 
+/* ---------- Quick check panel ---------- */
+
+.check-panel {
+  position: fixed; left: 0; right: 0; bottom: 0;
+  z-index: 30;
+  background: var(--surface);
+  border-top: 3px solid var(--accent);
+  box-shadow: 0 -6px 20px rgba(0, 0, 0, .25);
+  padding: 10px calc(14px + var(--sar)) calc(12px + var(--sab)) calc(14px + var(--sal));
+}
+.check-inner { max-width: 760px; margin: 0 auto; }
+.check-top { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.check-step { font-size: 20px; font-weight: 800; }
+.check-site { font-size: 14px; font-weight: 700; color: var(--muted); }
+.check-bar {
+  display: block; width: 100%; height: 8px; margin: 6px 0 8px;
+  -webkit-appearance: none; appearance: none;
+  border: 0; border-radius: 999px; overflow: hidden;
+  background: var(--surface-2); color: var(--btn);
+}
+.check-bar::-webkit-progress-bar { background: var(--surface-2); }
+.check-bar::-webkit-progress-value { background: var(--btn); border-radius: 999px; }
+.check-bar::-moz-progress-bar { background: var(--btn); border-radius: 999px; }
+.check-next { font-size: 17px; overflow-wrap: anywhere; }
+.check-next .id { margin-left: 0; }
+.check-target, .check-hint { margin-top: 2px; font-size: 14px; color: var(--muted); }
+.check-count { margin-top: 6px; font-size: 17px; font-weight: 800; }
+.check-done { font-size: 19px; font-weight: 800; }
+.check-actions { display: flex; gap: 8px; margin-top: 10px; }
+.check-actions .btn { flex: 1 1 0; min-height: 48px; padding: 0 8px; }
+.check-actions .btn-primary { flex-grow: 1.5; }
+
+body.has-check-panel .content { padding-bottom: calc(var(--check-h, 0px) + 104px + var(--sab)); }
+body.has-check-panel .fab { bottom: calc(var(--check-h, 0px) + 16px); }
+body.has-check-panel .toast { bottom: calc(var(--check-h, 0px) + 12px); }
+
 /* ---------- Sheets (dialogs) ---------- */
 
 dialog.sheet,
@@ -496,6 +574,11 @@ dialog.sheet > form { display: flex; flex-direction: column; flex: 1 1 auto; min
 .research summary { min-height: 44px; display: flex; align-items: center; padding: 0 12px; font-weight: 600; cursor: pointer; }
 .research-body { padding: 0 12px 12px; }
 
+/* The Quick check start sheet is short: it sits at the bottom on phones. */
+.check-options { display: grid; gap: 10px; margin: 14px 0 12px; }
+.check-option { width: 100%; min-height: 72px; border: 0; font-family: inherit; cursor: pointer; }
+.check-option.is-disabled { cursor: not-allowed; }
+
 dialog.confirm {
   width: min(360px, calc(100% - 32px));
   border-radius: 16px;
@@ -516,6 +599,13 @@ dialog.confirm p { margin-bottom: 18px; overflow-wrap: anywhere; }
   dialog.sheet .sheet-scroll { padding-left: calc(16px + var(--sal)); padding-right: calc(16px + var(--sar)); }
   dialog.sheet .sheet-foot { padding-bottom: calc(10px + var(--sab)); padding-left: calc(16px + var(--sal)); padding-right: calc(16px + var(--sar)); }
   dialog.sheet#settings .sheet-scroll { padding-bottom: calc(24px + var(--sab)); }
+  dialog.sheet.sheet-small {
+    height: auto; max-height: 90%;
+    inset: auto 0 0 0;
+    border-radius: 18px 18px 0 0;
+  }
+  dialog.sheet.sheet-small .sheet-head { padding-top: 8px; }
+  dialog.sheet.sheet-small .sheet-scroll { padding-bottom: calc(20px + var(--sab)); }
 }
 
 @media (min-width: 640px) {

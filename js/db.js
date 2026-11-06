@@ -9,6 +9,9 @@
  *    columns (suggested_target, usual_price, sold_*, sales_found, confidence,
  *    research_*, researched_*) are never sent, so research an agent writes at
  *    the same moment is never overwritten.
+ *  - list_order is never sent by addItem / updateItem. The database numbers new
+ *    items itself (end of the list). Only setOrder() changes the order, through
+ *    the set_item_order function.
  *  - Every method rejects with an Error whose .message is readable by a person
  *    and whose .kind is 'network' | 'auth' | 'credentials' | 'other'.
  */
@@ -25,7 +28,6 @@
     'what_counts', 'ebay_alert', 'fb_alert', 'my_target', 'my_notes'
   ];
   var SETTINGS_FIELDS = ['home_zip', 'fb_location_id', 'default_fb_radius_mi'];
-  var PRIORITY_RANK = { high: 0, normal: 1, low: 2 };
   var PAGE_SIZE = 1000;
 
   var client = null;
@@ -175,23 +177,33 @@
     return out;
   }
 
+  // list_order (1, 2, 3...) ascending, items without one last, then id.
+  function orderOf(item) {
+    var n = item ? item.list_order : null;
+    if (n === null || n === undefined || n === '') { return Infinity; }
+    n = Number(n);
+    return isFinite(n) ? n : Infinity;
+  }
+
   function sortItems(items) {
     return items.slice().sort(function (a, b) {
-      var ra = PRIORITY_RANK[a.priority]; if (ra === undefined) { ra = 1; }
-      var rb = PRIORITY_RANK[b.priority]; if (rb === undefined) { rb = 1; }
-      if (ra !== rb) { return ra - rb; }
-      var c = String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base', numeric: true });
-      return c !== 0 ? c : (a.id - b.id);
+      var oa = orderOf(a);
+      var ob = orderOf(b);
+      if (oa !== ob) { return oa < ob ? -1 : 1; }
+      return a.id - b.id;
     });
   }
 
-  // All items, ordered high/normal/low priority, then name.
+  // All items in the owner's exact list order.
   async function listItems() {
     var c = need();
     var all = [];
     var from = 0;
     for (;;) {
-      var res = await run(c.from('items').select('*').order('id', { ascending: true }).range(from, from + PAGE_SIZE - 1),
+      var res = await run(c.from('items').select('*')
+        .order('list_order', { ascending: true, nullsFirst: false })
+        .order('id', { ascending: true })
+        .range(from, from + PAGE_SIZE - 1),
         "Couldn't load your list.");
       var rows = res.data || [];
       all = all.concat(rows);
@@ -233,6 +245,17 @@
     return true;
   }
 
+  // Save the whole list order in one call: orderedIds[0] becomes #1, and so on.
+  async function setOrder(orderedIds) {
+    if (!Array.isArray(orderedIds)) { throw makeError('Missing list order.', 'other'); }
+    var ids = orderedIds.map(function (id) { return Number(id); });
+    for (var i = 0; i < ids.length; i++) {
+      if (!isFinite(ids[i]) || Math.floor(ids[i]) !== ids[i]) { throw makeError('Bad item id in the list order.', 'other'); }
+    }
+    await run(need().rpc('set_item_order', { ordered_ids: ids }), "Couldn't save the new order.");
+    return true;
+  }
+
   // ---------------------------------------------------------------------------
   // Settings (single row, id = 1)
   // ---------------------------------------------------------------------------
@@ -269,6 +292,7 @@
     addItem: addItem,
     updateItem: updateItem,
     deleteItem: deleteItem,
+    setOrder: setOrder,
     sortItems: sortItems,
     OWNER_ITEM_FIELDS: OWNER_ITEM_FIELDS.slice()
   };

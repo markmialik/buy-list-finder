@@ -9,6 +9,8 @@
  *   - The only href values ever set are straight from the BuyLinks builders
  *     (see linkEl()).
  *   - Values used as class names go through oneOf() whitelists.
+ *   - The only script navigation is navigateTo() (Quick check auto-open), and
+ *     it only accepts an eBay or Facebook address.
  */
 (function () {
   'use strict';
@@ -28,6 +30,11 @@
   var CONDITION_LABEL = { any: 'Any', 'new': 'New', used: 'Used', for_parts: 'For parts' };
   var TOGGLES = ['highOnly', 'fbOnly', 'noAlert'];
   var REFRESH_AFTER_MS = 60 * 1000;
+  var ORDER_SAVE_DELAY_MS = 500;           // quick taps in Arrange mode make one save
+  var SWEEP_KEY = 'blf_sweep_v1';          // Quick check progress
+  var SWEEP_MAX_AGE_MS = 12 * 60 * 60 * 1000;
+  var CHECK_COUNTDOWN_MS = 2000;           // iPhone auto-open delay
+  var CHECK_AUTO_RESUME_MS = 10 * 60 * 1000; // back after longer than this: wait for Continue
 
   var state = {
     items: [],
@@ -43,6 +50,7 @@
     category: '',
     query: '',
     expandedId: null,       // string id
+    arrange: false,         // Arrange mode (move items up and down)
     lastRefresh: 0
   };
   var refreshing = false;
@@ -141,6 +149,17 @@
     return a;
   }
 
+  // The ONLY script navigation: Quick check auto-open on iPhone/iPad. It is
+  // one small function so tests can replace it (window.BuyListApp.navigateTo).
+  // It still refuses anything that is not an eBay or Facebook address.
+  var app = window.BuyListApp = {
+    navigateTo: function (url) {
+      if (!/^https:\/\/www\.(ebay|facebook)\.com\//.test(String(url))) { return; }
+      window.location.href = url;
+    }
+  };
+  function navigateTo(url) { app.navigateTo(url); }
+
   // ---------------------------------------------------------------------------
   // Cache (localStorage)
   // ---------------------------------------------------------------------------
@@ -202,14 +221,15 @@
   }
 
   function closeAllDialogs() {
-    ['editor', 'settings', 'confirm'].forEach(function (id) {
+    ['editor', 'settings', 'confirm', 'check-sheet', 'move-dialog'].forEach(function (id) {
       var d = $(id);
       if (d.open) { d.close(); }
     });
   }
 
   function syncModalClass() {
-    var any = $('editor').open || $('settings').open || $('confirm').open;
+    var any = $('editor').open || $('settings').open || $('confirm').open ||
+      $('check-sheet').open || $('move-dialog').open;
     document.body.classList.toggle('modal-open', any);
   }
 
@@ -222,10 +242,16 @@
     state.userId = null;
     state.email = '';
     state.expandedId = null;
+    state.arrange = false;
+    resetOrderSave();
+    cancelCountdown();
+    clearSweepStorage();
     clearCache();
     closeAllDialogs();
     setBanner('');
     clear($('list'));
+    renderToolbar();
+    renderCheckPanel();
     showScreen('login');
     var err = $('login-error');
     err.hidden = !message;
@@ -250,7 +276,13 @@
   function mergeItem(row) {
     var found = false;
     for (var i = 0; i < state.items.length; i++) {
-      if (String(state.items[i].id) === String(row.id)) { state.items[i] = row; found = true; break; }
+      if (String(state.items[i].id) === String(row.id)) {
+        // An order save is still on its way: keep the position shown on screen.
+        if (orderPending()) { row.list_order = state.items[i].list_order; }
+        state.items[i] = row;
+        found = true;
+        break;
+      }
     }
     if (!found) { state.items.push(row); }
     state.items = DB.sortItems(state.items);
@@ -321,12 +353,242 @@
   }
 
   // ---------------------------------------------------------------------------
+  // List order + Arrange mode
+  //
+  // state.items is always in the owner's exact order (list_order). A move works
+  // on the whole list, but is described in terms of the items on screen:
+  // hidden items never jump over each other. After a move we redraw at once,
+  // then save the whole order with one setOrder() call (debounced).
+  // ---------------------------------------------------------------------------
+  var orderSave = { timer: null, dirty: false, running: null };
+  var orderEpoch = 0;          // counts local moves, so refresh() can tell its answer is out of date
+  var serverOrderIds = null;   // ids in the order the server last confirmed
+
+  function idsOf(items) { return items.map(function (it) { return String(it.id); }); }
+
+  function orderPending() { return orderSave.dirty || !!orderSave.running; }
+
+  // allIds: every id in list order. visibleIds: the ids on screen, in the same
+  // relative order. kind: 'up' | 'down' | 'top' | 'to' (n = visible position,
+  // counted from 1). Returns the new full order, or null when nothing moves.
+  //   up    just before the previous visible item
+  //   down  just after the next visible item
+  //   top   just before the first visible item
+  //   to    so the item ends up at visible position n: before the item now at
+  //         n when moving up, after it when moving down (so n = the visible
+  //         count puts it after the last visible item)
+  function reorder(allIds, visibleIds, id, kind, n) {
+    var vi = visibleIds.indexOf(id);
+    if (vi === -1 || allIds.indexOf(id) === -1) { return null; }
+    var last = visibleIds.length - 1;
+    var anchor;
+    var after;
+    if (kind === 'up') {
+      if (vi === 0) { return null; }
+      anchor = visibleIds[vi - 1]; after = false;
+    } else if (kind === 'down') {
+      if (vi === last) { return null; }
+      anchor = visibleIds[vi + 1]; after = true;
+    } else if (kind === 'top') {
+      if (vi === 0) { return null; }
+      anchor = visibleIds[0]; after = false;
+    } else if (kind === 'to') {
+      var target = n - 1;
+      if (Math.floor(target) !== target || target < 0 || target > last || target === vi) { return null; }
+      anchor = visibleIds[target]; after = target > vi;
+    } else {
+      return null;
+    }
+    var rest = allIds.filter(function (x) { return x !== id; });
+    var at = rest.indexOf(anchor);
+    if (at === -1) { return null; }
+    rest.splice(after ? at + 1 : at, 0, id);
+    return rest;
+  }
+
+  // Put state.items in the order of `ids` and renumber list_order 1..N.
+  // Items missing from `ids` (added meanwhile) keep their relative order at the end.
+  function applyOrder(ids) {
+    var byId = {};
+    state.items.forEach(function (it) { byId[String(it.id)] = it; });
+    var out = [];
+    ids.forEach(function (id) {
+      if (byId[id]) { out.push(byId[id]); delete byId[id]; }
+    });
+    state.items.forEach(function (it) { if (byId[String(it.id)]) { out.push(it); } });
+    out.forEach(function (it, i) { it.list_order = i + 1; });
+    state.items = out;
+  }
+
+  function resetOrderSave() {
+    clearTimeout(orderSave.timer);
+    orderSave.timer = null;
+    orderSave.dirty = false;
+    serverOrderIds = null;
+  }
+
+  function scheduleOrderSave() {
+    orderSave.dirty = true;
+    clearTimeout(orderSave.timer);
+    orderSave.timer = setTimeout(function () { flushOrderSave(); }, ORDER_SAVE_DELAY_MS);
+  }
+
+  // Sends the order now if a save is waiting. Never rejects. Resolves when
+  // nothing is left to save (or the save failed and was handled).
+  function flushOrderSave() {
+    clearTimeout(orderSave.timer);
+    orderSave.timer = null;
+    if (orderSave.running) { return orderSave.running; }
+    if (!orderSave.dirty) { return Promise.resolve(); }
+    orderSave.running = saveOrderLoop().then(function (err) {
+      orderSave.running = null;
+      if (err) { orderSaveFailed(err); }
+    });
+    return orderSave.running;
+  }
+
+  // Repeats while more moves arrive during a save. Returns the error, or null.
+  async function saveOrderLoop() {
+    while (orderSave.dirty) {
+      orderSave.dirty = false;
+      var ids = idsOf(state.items);
+      try {
+        await DB.setOrder(ids);
+        serverOrderIds = ids;
+      } catch (e) {
+        orderSave.dirty = false;
+        return e;
+      }
+    }
+    return null;
+  }
+
+  function orderSaveFailed(e) {
+    if (e && e.kind === 'auth') { leaveApp('Your session expired. Please sign in again.'); return; }
+    toast('Order not saved. ' + ((e && e.message) || "Couldn't save the new order."), true);
+    if (serverOrderIds) {   // show the order the server really has, then re-fetch it
+      applyOrder(serverOrderIds);
+      saveCache();
+      renderAll();
+    }
+    refresh();
+  }
+
+  // The moved item's controls are rebuilt on every move; this puts keyboard
+  // focus back. A disabled button (first/last row) hands focus to its neighbour.
+  var FOCUS_FALLBACK = { up: ['down', 'pos'], down: ['up', 'pos'], top: ['down', 'up', 'pos'] };
+
+  function focusByKey(fk) {
+    var m = /^([a-z]+):(.*)$/.exec(fk || '');
+    var keys = [fk];
+    if (m && Object.prototype.hasOwnProperty.call(FOCUS_FALLBACK, m[1])) {
+      FOCUS_FALLBACK[m[1]].forEach(function (k) { keys.push(k + ':' + m[2]); });
+    }
+    for (var i = 0; i < keys.length; i++) {
+      var el = $('list').querySelector('[data-fk="' + String(keys[i]).replace(/"/g, '') + '"]');
+      if (el && !el.disabled) { el.focus({ preventScroll: true }); return el; }
+    }
+    return null;
+  }
+
+  // kind: 'up' | 'down' | 'top' | 'to'. Moves relative to the visible items.
+  function moveItem(id, kind, n, focusKey) {
+    id = String(id);
+    var next = reorder(idsOf(state.items), idsOf(state.items.filter(matchesFilters)), id, kind, n);
+    if (!next) { return false; }
+    applyOrder(next);
+    orderEpoch += 1;
+    saveCache();
+    renderList(focusKey);
+    var li = $('list').querySelector('[data-id="' + id.replace(/"/g, '') + '"]');
+    if (li && li.scrollIntoView) { li.scrollIntoView({ block: 'nearest' }); }
+    scheduleOrderSave();
+    return true;
+  }
+
+  function setArrange(on) {
+    on = !!on && !sweepActive();
+    if (state.arrange === on) { return; }
+    state.arrange = on;
+    if (on) { state.expandedId = null; }
+    renderToolbar();
+    renderList();
+    if (!on) { flushOrderSave(); }
+  }
+
+  function renderToolbar() {
+    var active = sweepActive();
+    var arr = $('btn-arrange');
+    document.body.classList.toggle('is-arranging', state.arrange);
+    arr.textContent = state.arrange ? 'Done' : 'Arrange';
+    arr.classList.toggle('btn-primary', state.arrange);
+    arr.disabled = active;
+    if (active) { arr.setAttribute('title', 'Stop the Quick check first'); } else { arr.removeAttribute('title'); }
+    var chk = $('btn-check');
+    chk.disabled = active || state.arrange;
+    if (active) { chk.setAttribute('title', 'A Quick check is already running'); }
+    else if (state.arrange) { chk.setAttribute('title', 'Tap Done first'); }
+    else { chk.removeAttribute('title'); }
+  }
+
+  // --- "Move to position" prompt -------------------------------------------
+  var movingId = null;
+
+  function openMoveDialog(id) {
+    var shown = state.items.filter(matchesFilters);
+    var idx = -1;
+    shown.forEach(function (it, i) { if (String(it.id) === String(id)) { idx = i; } });
+    if (idx === -1) { return; }
+    movingId = String(id);
+    $('move-text').textContent = '“' + (str(shown[idx].name) || '(no name)') + '” is at ' + (idx + 1) + ' of ' +
+      shown.length + '. Enter a position from 1 to ' + shown.length + '.';
+    $('move-input').value = String(idx + 1);
+    $('move-err').textContent = '';
+    $('move-input').removeAttribute('aria-invalid');
+    $('move-dialog').showModal();
+    syncModalClass();
+    $('move-input').focus();
+    $('move-input').select();
+  }
+
+  function submitMove(ev) {
+    ev.preventDefault();
+    var count = state.items.filter(matchesFilters).length;
+    var raw = $('move-input').value.trim();
+    if (!/^\d+$/.test(raw) || Number(raw) < 1 || Number(raw) > count) {
+      $('move-err').textContent = 'Enter a whole number from 1 to ' + count + '.';
+      $('move-input').setAttribute('aria-invalid', 'true');
+      $('move-input').focus();
+      return;
+    }
+    var id = movingId;
+    $('move-dialog').close();
+    movingId = null;
+    moveItem(id, 'to', Number(raw), 'pos:' + id);
+    var again = $('list').querySelector('[data-fk="pos:' + String(id).replace(/"/g, '') + '"]');
+    if (again) { again.focus({ preventScroll: true }); }
+  }
+
+  function wireArrange() {
+    $('btn-arrange').addEventListener('click', function () { setArrange(!state.arrange); });
+    $('move-form').addEventListener('submit', submitMove);
+    $('move-cancel').addEventListener('click', function () { $('move-dialog').close(); });
+    $('move-dialog').addEventListener('close', syncModalClass);
+    $('move-input').addEventListener('input', function () {
+      $('move-err').textContent = '';
+      $('move-input').removeAttribute('aria-invalid');
+    });
+  }
+
+  // ---------------------------------------------------------------------------
   // Rendering: top-level
   // ---------------------------------------------------------------------------
   function renderAll() {
     renderChips();
     renderCategorySelect();
     renderList();
+    renderToolbar();
+    renderCheckPanel();
   }
 
   function renderChips() {
@@ -361,16 +623,25 @@
   }
 
   // Keep keyboard focus on the "same" control after the list is rebuilt.
-  function renderList() {
+  // `focusKey` overrides it (used when the focused control is not in the list).
+  function renderList(focusKey) {
     var active = document.activeElement;
-    var fk = active && active.dataset ? active.dataset.fk : null;
+    var fk = focusKey || (active && active.dataset ? active.dataset.fk : null);
 
     var list = $('list');
     clear(list);
     var shown = state.items.filter(matchesFilters);
     var frag = document.createDocumentFragment();
-    shown.forEach(function (item) { frag.appendChild(buildItem(item)); });
+    if (state.arrange) {
+      shown.forEach(function (item, i) { frag.appendChild(buildArrangeItem(item, i + 1, shown.length)); });
+    } else {
+      // The number on each row is its place in the whole list, not in this view.
+      var posById = {};
+      state.items.forEach(function (it, i) { posById[String(it.id)] = i + 1; });
+      shown.forEach(function (item) { frag.appendChild(buildItem(item, posById[String(item.id)])); });
+    }
     list.appendChild(frag);
+    renderArrangeHint(shown.length, state.items.length);
 
     var total = state.items.length;
     $('count').textContent = !state.loaded ? '' :
@@ -378,10 +649,15 @@
 
     renderEmpty(shown.length, total);
 
-    if (fk) {
-      var again = list.querySelector('[data-fk="' + fk.replace(/"/g, '') + '"]');
-      if (again) { again.focus({ preventScroll: true }); }
-    }
+    if (fk) { focusByKey(fk); }
+  }
+
+  function renderArrangeHint(shownCount, total) {
+    var hint = $('arrange-hint');
+    hint.hidden = !state.arrange;
+    if (!state.arrange) { hint.textContent = ''; return; }
+    hint.textContent = 'Use \u25B2 \u25BC and Top, or tap a number to type a position.' +
+      (shownCount !== total ? ' Numbers count only the items shown. Hidden items keep their place.' : '');
   }
 
   function renderEmpty(shownCount, total) {
@@ -484,7 +760,38 @@
     return out;
   }
 
-  function buildItem(item) {
+  // One row in Arrange mode: big position, name, and the move buttons.
+  // `pos` counts the items on screen (1..total), which is what "move to" uses.
+  function buildArrangeItem(item, pos, total) {
+    var id = String(item.id);
+    var status = oneOf(item.status, STATUSES, 'hunting');
+    var name = str(item.name) || '(no name)';
+
+    function moveBtn(act, label, text, disabled) {
+      return h('button', {
+        type: 'button', 'class': 'arr-btn' + (act === 'top' ? ' arr-top' : ''),
+        'data-act': act, 'data-fk': act + ':' + id,
+        'aria-label': label, disabled: disabled
+      }, text);
+    }
+
+    return h('li', { 'class': 'item arrange is-' + status, 'data-id': id },
+      h('div', { 'class': 'arr-row' },
+        h('button', {
+          type: 'button', 'class': 'arr-pos', 'data-act': 'pos', 'data-fk': 'pos:' + id,
+          'aria-label': 'Position ' + pos + ' of ' + total + ': ' + name + '. Tap to move to a position.'
+        }, String(pos)),
+        h('span', { 'class': 'arr-name' },
+          h('span', { 'class': 'name' }, name),
+          ' ',
+          h('span', { 'class': 'id' }, '#' + id)),
+        h('span', { 'class': 'arr-btns' },
+          moveBtn('up', 'Move up: ' + name, '\u25B2', pos === 1),
+          moveBtn('down', 'Move down: ' + name, '\u25BC', pos === total),
+          moveBtn('top', 'Move to top: ' + name, 'Top', pos === 1))));
+  }
+
+  function buildItem(item, pos) {
     var id = String(item.id);
     var status = oneOf(item.status, STATUSES, 'hunting');
     var expanded = state.expandedId === id;
@@ -496,6 +803,7 @@
       'aria-controls': 'detail-' + id,
       'data-fk': 'row:' + id
     },
+      h('span', { 'class': 'pos' }, pos ? String(pos) : ''),
       h('span', { 'class': 'row-main' },
         h('span', { 'class': 'row-title' },
           h('span', { 'class': 'name' }, str(item.name) || '(no name)'),
@@ -729,6 +1037,396 @@
   }
 
   // ---------------------------------------------------------------------------
+  // Quick check: go through the shown items one by one
+  //
+  // Progress lives in localStorage (SWEEP_KEY), not in memory, because the
+  // page is put to sleep (or reloaded) while eBay / Facebook is in front.
+  //   phase 'away'      we opened a search; waiting for you to come back
+  //   phase 'countdown' the panel shows the next item (iPhone: counting down)
+  //   phase 'paused'    the countdown was interrupted; tap Continue
+  //   phase 'done'      every item has been visited
+  // Coming back (visible again, pageshow, or app start) while 'away' moves on
+  // to the next item. Those events can fire together, so every step is driven
+  // by the stored phase: the second event sees 'countdown' and does nothing.
+  // ---------------------------------------------------------------------------
+  var SWEEP_SITES = ['ebay', 'facebook'];
+  var SWEEP_PHASES = ['away', 'countdown', 'paused', 'done'];
+  var SWEEP_MAX_IDS = 5000;
+  var countdown = { timer: null, tick: null, endsAt: 0 };
+  var lastPanelSig = null;
+
+  function isInt(v) { return typeof v === 'number' && isFinite(v) && Math.floor(v) === v; }
+
+  function clearSweepStorage() {
+    try { localStorage.removeItem(SWEEP_KEY); } catch (e) { /* ignore */ }
+  }
+
+  function writeSweep(sw) {
+    try { localStorage.setItem(SWEEP_KEY, JSON.stringify(sw)); } catch (e) { /* not fatal */ }
+  }
+
+  // The saved check, checked field by field, or null. Junk and anything older
+  // than 12 hours is thrown away.
+  function readSweep() {
+    var raw;
+    try { raw = localStorage.getItem(SWEEP_KEY); } catch (e) { return null; }
+    if (!raw) { return null; }
+    var sw = null;
+    try { sw = JSON.parse(raw); } catch (e) { sw = null; }
+    var ok = !!sw && typeof sw === 'object' &&
+      SWEEP_SITES.indexOf(sw.site) !== -1 &&
+      SWEEP_PHASES.indexOf(sw.phase) !== -1 &&
+      Array.isArray(sw.ids) && sw.ids.length <= SWEEP_MAX_IDS &&
+      sw.ids.every(function (v) { return typeof v === 'number' || typeof v === 'string'; }) &&
+      isInt(sw.index) && sw.index >= 0 && sw.index <= sw.ids.length &&
+      typeof sw.startedAt === 'number' && isFinite(sw.startedAt) &&
+      Date.now() - sw.startedAt <= SWEEP_MAX_AGE_MS;
+    if (!ok) { clearSweepStorage(); return null; }
+    // How many searches were really opened (skips don't count).
+    if (!isInt(sw.opened) || sw.opened < 0) { sw.opened = sw.phase === 'away' ? sw.index + 1 : sw.index; }
+    return sw;
+  }
+
+  function sweepActive() {
+    var sw = readSweep();
+    return !!sw && sw.phase !== 'done';
+  }
+
+  // The search address for one item on one site, or null if it can't be searched there.
+  function sweepUrl(site, item) {
+    if (!item || searchedSites(item).indexOf(site) === -1 || !Links.canSearch(item)) { return null; }
+    var settings = state.settings || {};
+    var url = site === 'ebay' ? Links.buildEbayNewUrl(item, settings) : Links.buildFacebookUrl(item, settings);
+    return url || null;
+  }
+
+  // Items in the current view that can be searched on this site, in list order.
+  function sweepEligible(site) {
+    return state.items.filter(matchesFilters).filter(function (it) { return !!sweepUrl(site, it); });
+  }
+
+  function stepUrl(sw, i) { return sweepUrl(sw.site, itemById(sw.ids[i])); }
+
+  // --- countdown timer ------------------------------------------------------
+  function cancelCountdown() {
+    clearTimeout(countdown.timer);
+    clearInterval(countdown.tick);
+    countdown.timer = null;
+    countdown.tick = null;
+  }
+
+  function startCountdown() {
+    cancelCountdown();
+    countdown.endsAt = Date.now() + CHECK_COUNTDOWN_MS;
+    countdown.timer = setTimeout(fireCountdown, CHECK_COUNTDOWN_MS);
+    countdown.tick = setInterval(updateCountdownText, 250);
+    renderToolbar();
+    renderCheckPanel(true);
+  }
+
+  function updateCountdownText() {
+    var el = $('check-count');
+    if (!el) { return; }
+    var left = Math.max(1, Math.ceil((countdown.endsAt - Date.now()) / 1000));
+    el.textContent = 'Opening in ' + left + '…';
+  }
+
+  // The countdown ran out: open the search (iPhone/iPad only). The stored
+  // phase goes to 'away' first, so this can never open twice for one return.
+  function fireCountdown() {
+    cancelCountdown();
+    var sw = readSweep();
+    if (!sw || sw.phase !== 'countdown' || !IS_IOS) { return; }
+    if (document.visibilityState !== 'visible') { pauseCountdown(); return; }
+    var url = stepUrl(sw, sw.index);
+    if (!url) { sw.index += 1; settleSweep(sw, true); return; }   // item was deleted or edited meanwhile
+    sw.phase = 'away';
+    sw.awayAt = Date.now();
+    sw.opened += 1;
+    writeSweep(sw);
+    renderToolbar();
+    renderCheckPanel();
+    navigateTo(url);
+  }
+
+  // The page went to the background while counting: stop and wait.
+  function pauseCountdown() {
+    if (!countdown.timer) { return; }
+    cancelCountdown();
+    var sw = readSweep();
+    if (sw && sw.phase === 'countdown') {
+      sw.phase = 'paused';
+      writeSweep(sw);
+    }
+    renderToolbar();
+    renderCheckPanel();
+  }
+
+  // --- moving through the list ---------------------------------------------
+  // Skip over ids that no longer exist or can't be searched; then either show
+  // the next item (counting down if `count` and on iPhone) or finish.
+  function settleSweep(sw, count) {
+    while (sw.index < sw.ids.length && !stepUrl(sw, sw.index)) { sw.index += 1; }
+    if (sw.index >= sw.ids.length) {
+      cancelCountdown();
+      sw.phase = 'done';
+    } else {
+      sw.phase = 'countdown';
+    }
+    writeSweep(sw);
+    if (sw.phase === 'countdown' && count && IS_IOS) {
+      startCountdown();
+    } else {
+      renderToolbar();
+      renderCheckPanel();
+    }
+  }
+
+  // Called when the page is visible again or just started.
+  function resumeSweep() {
+    if (!state.loaded || document.visibilityState !== 'visible') { return; }
+    var sw = readSweep();
+    if (sw && sw.phase === 'away') {
+      sw.index += 1;           // the item we sent you to is done; on to the next
+      // Only auto-open if you're coming straight back; after a long break
+      // (or an unknown one), show the panel and wait for Continue.
+      var quickReturn = typeof sw.awayAt === 'number' && Date.now() - sw.awayAt <= CHECK_AUTO_RESUME_MS;
+      settleSweep(sw, quickReturn);
+      return;
+    }
+    renderToolbar();
+    renderCheckPanel();
+  }
+
+  // Desktop: the search opened in its own tab (maybe in the background), so
+  // there may never be a "came back" moment. Move on to the next item now.
+  // Deferred so the link's own click finishes first.
+  function advanceAfterDesktopOpen() {
+    if (IS_IOS) { return; }
+    setTimeout(function () {
+      var sw = readSweep();
+      if (sw && sw.phase === 'away') {
+        sw.index += 1;
+        settleSweep(sw, false);
+      }
+    }, 0);
+  }
+
+  function startSweep(site, ids) {
+    cancelCountdown();
+    var now = Date.now();
+    writeSweep({ site: site, ids: ids.slice(), index: 0, phase: 'away', startedAt: now, awayAt: now, opened: 1 });
+    closeCheckSheet();
+    renderToolbar();
+    renderCheckPanel();
+    advanceAfterDesktopOpen();
+  }
+
+  function stopSweep() {
+    var sw = readSweep();
+    cancelCountdown();
+    clearSweepStorage();
+    renderToolbar();
+    renderCheckPanel();
+    if (sw && sw.phase !== 'done') { toast('Stopped after ' + sw.index + ' of ' + sw.ids.length); }
+  }
+
+  function skipSweep() {
+    var sw = readSweep();
+    if (!sw || (sw.phase !== 'countdown' && sw.phase !== 'paused')) { return; }
+    cancelCountdown();
+    sw.index += 1;
+    settleSweep(sw, true);
+  }
+
+  function continueSweep() {
+    var sw = readSweep();
+    if (!sw || (sw.phase !== 'countdown' && sw.phase !== 'paused') || !IS_IOS) { return; }
+    sw.phase = 'countdown';
+    writeSweep(sw);
+    startCountdown();
+  }
+
+  // Click on "Open now" / "Open". These are real links, so this must not
+  // preventDefault: it only records that we are going away.
+  function markOpened() {
+    var sw = readSweep();
+    if (!sw || (sw.phase !== 'countdown' && sw.phase !== 'paused')) { return; }
+    cancelCountdown();
+    sw.phase = 'away';
+    sw.awayAt = Date.now();
+    sw.opened += 1;
+    writeSweep(sw);
+    renderToolbar();
+    renderCheckPanel();
+    advanceAfterDesktopOpen();
+  }
+
+  // --- start sheet ----------------------------------------------------------
+  function closeCheckSheet() {
+    var d = $('check-sheet');
+    if (d.open) { d.close(); }
+  }
+
+  function openCheckSheet() {
+    if (!state.loaded || state.arrange || sweepActive()) { return; }
+    var box = $('check-options');
+    clear(box);
+    SWEEP_SITES.forEach(function (site) {
+      var items = sweepEligible(site);
+      var label = (site === 'ebay' ? 'eBay newest' : 'Facebook') + ' (' + plural(items.length, 'item', 'items') + ')';
+      var sub = site === 'ebay' ? 'Buy It Now, newest first' : 'Marketplace, newest first';
+      if (items.length === 0) {
+        box.appendChild(h('button', {
+          type: 'button', 'class': 'linkbtn check-option is-disabled', disabled: true, 'aria-disabled': 'true'
+        }, h('span', null, label), h('span', { 'class': 'sub' }, 'Nothing to check here')));
+        return;
+      }
+      var ids = items.map(function (it) { return it.id; });
+      // A real link to the first search. The click saves the progress, closes
+      // the sheet and lets the browser follow the link as usual.
+      var a = linkEl(sweepUrl(site, items[0]), 'linkbtn check-option ' + (site === 'ebay' ? 'ebay' : 'fb'),
+        [h('span', null, label), h('span', { 'class': 'sub' }, sub)]);
+      a.addEventListener('click', function () { startSweep(site, ids); });
+      box.appendChild(a);
+    });
+    $('check-sheet').showModal();
+    syncModalClass();
+  }
+
+  // --- the panel -------------------------------------------------------------
+  // What the panel should show right now, or null to hide it.
+  function checkView() {
+    var sw = readSweep();
+    if (!sw || sw.phase === 'away') { return null; }
+    if (sw.phase === 'done') { return { mode: 'done', count: sw.opened }; }
+
+    var item = itemById(sw.ids[sw.index]);
+    if (!item) { return null; }
+    var t = effectiveTarget(item);
+    return {
+      mode: !IS_IOS ? 'manual' : (countdown.timer ? 'counting' : 'paused'),
+      site: sw.site,
+      n: sw.index + 1,
+      total: sw.ids.length,
+      name: str(item.name) || '(no name)',
+      id: String(item.id),
+      target: t ? 'Target ' + money(t.value) + ' (' + t.label + ')' : 'No target',
+      hint: (sw.site === 'facebook' && IS_IOS) ? fbAppHint(item, state.settings || {}) : '',
+      url: stepUrl(sw, sw.index)
+    };
+  }
+
+  function checkButton(label, fk, cls, onClick) {
+    var b = h('button', { type: 'button', 'class': 'btn ' + cls, 'data-fk': fk }, label);
+    b.addEventListener('click', onClick);
+    return b;
+  }
+
+  function checkLink(url, label, fk, cls) {
+    var a = linkEl(url, 'btn ' + cls, label);
+    a.setAttribute('data-fk', fk);
+    a.addEventListener('click', markOpened);
+    return a;
+  }
+
+  function buildCheckPanel(v) {
+    var inner = h('div', { 'class': 'check-inner' });
+
+    if (v.mode === 'done') {
+      inner.appendChild(h('p', { 'class': 'check-done' }, 'Done. Checked ' + plural(v.count, 'item', 'items') + '.'));
+      inner.appendChild(h('div', { 'class': 'check-actions' },
+        checkButton('Close', 'chk:close', 'btn-primary', stopSweep)));
+      return inner;
+    }
+
+    inner.appendChild(h('div', { 'class': 'check-top' },
+      h('span', { 'class': 'check-step' }, v.n + ' of ' + v.total),
+      h('span', { 'class': 'check-site' }, v.site === 'ebay' ? 'eBay newest' : 'Facebook')));
+    inner.appendChild(h('progress', { 'class': 'check-bar', max: v.total, value: v.n, 'aria-label': 'Progress' }));
+    inner.appendChild(h('p', { 'class': 'check-next' },
+      'Next: ', h('strong', null, v.name), ' ', h('span', { 'class': 'id' }, '#' + v.id)));
+    inner.appendChild(h('p', { 'class': 'check-target' }, v.target));
+    if (v.hint) { inner.appendChild(h('p', { 'class': 'check-hint' }, v.hint)); }
+
+    var stop = checkButton('Stop', 'chk:stop', '', stopSweep);
+    var actions = h('div', { 'class': 'check-actions' });
+    if (v.mode === 'counting') {
+      inner.appendChild(h('p', { 'class': 'check-count', id: 'check-count', 'aria-live': 'off' }, 'Opening in 2…'));
+      actions.appendChild(stop);
+      actions.appendChild(checkButton('Skip', 'chk:skip', '', skipSweep));
+      actions.appendChild(checkLink(v.url, 'Open now', 'chk:open', 'btn-primary'));
+    } else if (v.mode === 'paused') {
+      inner.appendChild(h('p', { 'class': 'check-count', id: 'check-count' }, 'Paused. Tap Continue to open it.'));
+      actions.appendChild(stop);
+      actions.appendChild(checkLink(v.url, 'Open now', 'chk:open', ''));
+      actions.appendChild(checkButton('Continue', 'chk:continue', 'btn-primary', continueSweep));
+    } else {   // desktop: no countdown (popup blockers), you open each one yourself
+      actions.appendChild(stop);
+      actions.appendChild(checkButton('Skip', 'chk:skip', '', skipSweep));
+      actions.appendChild(checkLink(v.url, 'Open', 'chk:open', 'btn-primary'));
+    }
+    inner.appendChild(actions);
+    return inner;
+  }
+
+  function measureCheckPanel() {
+    var p = $('check-panel');
+    var root = document.documentElement;
+    if (p.hidden) { root.style.removeProperty('--check-h'); return; }
+    if (p.offsetHeight) { root.style.setProperty('--check-h', p.offsetHeight + 'px'); }
+  }
+
+  // The item the panel is showing may have been deleted or edited since (a
+  // refresh, or the editor): move on to the next one that can be searched.
+  function fixShownStep() {
+    var sw = readSweep();
+    if (!sw || (sw.phase !== 'countdown' && sw.phase !== 'paused')) { return; }
+    if (sw.index >= sw.ids.length || stepUrl(sw, sw.index)) { return; }
+    var wasCounting = !!countdown.timer;
+    cancelCountdown();
+    sw.index += 1;
+    settleSweep(sw, wasCounting);
+  }
+
+  // Rebuilds the panel only when what it shows has changed (not on every tick).
+  function renderCheckPanel(force) {
+    var panel = $('check-panel');
+    if (state.loaded) { fixShownStep(); }
+    var v = state.loaded ? checkView() : null;
+    if (!v) {
+      // Only hide it: a link inside (Open now) may be the one being clicked right now.
+      lastPanelSig = null;
+      panel.hidden = true;
+      document.body.classList.remove('has-check-panel');
+      measureCheckPanel();
+      return;
+    }
+    var sig = JSON.stringify(v);
+    if (!force && !panel.hidden && sig === lastPanelSig) { return; }
+    lastPanelSig = sig;
+
+    var active = document.activeElement;
+    var fk = active && panel.contains(active) && active.dataset ? active.dataset.fk : null;
+    clear(panel);
+    panel.appendChild(buildCheckPanel(v));
+    panel.hidden = false;
+    document.body.classList.add('has-check-panel');
+    measureCheckPanel();
+    if (fk) {
+      var again = panel.querySelector('[data-fk="' + String(fk).replace(/"/g, '') + '"]');
+      if (again) { again.focus({ preventScroll: true }); }
+    }
+    if (v.mode === 'counting') { updateCountdownText(); }
+  }
+
+  function wireCheck() {
+    $('btn-check').addEventListener('click', openCheckSheet);
+    $('check-sheet-x').addEventListener('click', closeCheckSheet);
+    $('check-sheet').addEventListener('close', syncModalClass);
+  }
+
+  // ---------------------------------------------------------------------------
   // Saving an alert checkbox straight from the card
   // ---------------------------------------------------------------------------
   async function saveAlert(item, field, cb) {
@@ -761,18 +1459,29 @@
   async function refresh() {
     if (refreshing || !state.userId) { return; }
     refreshing = true;
+    var stale = false;
     if (state.loaded && navigator.onLine === false) { setBanner('Offline, showing saved copy.'); }
     try {
+      // Moves made in Arrange mode go to the server first, so loading can't undo them.
+      if (orderPending()) { await flushOrderSave(); }
+      var epoch = orderEpoch;
+      var firstLoad = !state.loaded;
       var results = await Promise.all([DB.listItems(), DB.getSettings()]);
       if (!state.userId) { return; }   // signed out while loading
-      state.items = results[0];
       if (results[1]) { state.settings = results[1]; }
+      if (epoch !== orderEpoch || orderPending()) {
+        stale = true;   // you moved something while this was loading: its order is out of date
+      } else {
+        state.items = results[0];
+        serverOrderIds = idsOf(state.items);
+      }
       state.loaded = true;
       state.loadError = '';
       state.lastRefresh = Date.now();
       setBanner('');
       saveCache();
       renderAll();
+      if (firstLoad) { resumeSweep(); }
     } catch (e) {
       if (e && e.kind === 'auth') { leaveApp('Your session expired. Please sign in again.'); return; }
       if (!state.userId) { return; }
@@ -786,6 +1495,7 @@
       renderAll();
     } finally {
       refreshing = false;
+      if (stale) { flushOrderSave().then(function () { refresh(); }); }
     }
   }
 
@@ -1347,6 +2057,15 @@
     });
 
     $('list').addEventListener('click', function (ev) {
+      var act = ev.target.closest ? ev.target.closest('[data-act]') : null;
+      if (act) {   // Arrange mode buttons
+        var holder = act.closest('li');
+        var id = holder && holder.dataset.id;
+        if (!id) { return; }
+        if (act.dataset.act === 'pos') { openMoveDialog(id); }
+        else { moveItem(id, act.dataset.act); }
+        return;
+      }
       var row = ev.target.closest ? ev.target.closest('.row') : null;
       if (!row) { return; }
       var li = row.parentNode;
@@ -1379,16 +2098,26 @@
     wireList();
     wireEditor();
     wireSettings();
+    wireArrange();
+    wireCheck();
 
     if (window.ResizeObserver) {
       new ResizeObserver(measureHeader).observe($('topbar'));
+      new ResizeObserver(measureCheckPanel).observe($('check-panel'));
     }
     window.addEventListener('online', function () { refresh(); });
     document.addEventListener('visibilitychange', function () {
-      if (document.visibilityState === 'visible' && state.userId && Date.now() - state.lastRefresh > REFRESH_AFTER_MS) {
-        refresh();
+      if (document.visibilityState === 'hidden') {
+        flushOrderSave();     // leaving the page: don't lose a move that is still waiting
+        pauseCountdown();
+      } else if (document.visibilityState === 'visible') {
+        if (state.userId && Date.now() - state.lastRefresh > REFRESH_AFTER_MS) { refresh(); }
+        resumeSweep();
       }
     });
+    // pageshow also fires when Safari restores the page from its back/forward cache.
+    window.addEventListener('pageshow', function () { resumeSweep(); });
+    window.addEventListener('pagehide', function () { flushOrderSave(); pauseCountdown(); });
 
     try {
       DB.init();
@@ -1408,6 +2137,7 @@
       applyCache(cache);
       showScreen('app');
       renderAll();
+      resumeSweep();
     }
 
     var res = await DB.getSession();

@@ -16,6 +16,16 @@ Each link carries the item's details: search words, price range, condition, cate
 
 Distance only applies to Facebook: it uses the item's distance, or a default radius if the item has none. eBay always searches nationwide, because everything there ships.
 
+## Arrange and Quick check
+
+Your list stays in exactly the order you choose. Each row starts with its number in the whole list (1, 2, 3...). New items go to the end.
+
+**Arrange.** Tap **Arrange** in the top bar to change the order. Each row then shows a big number and three buttons: **▲** and **▼** move the item one place, **Top** moves it to the front. Tap the number to type the place you want instead. Filters and search still work while you arrange. A move counts places among the items you can see, so hidden items never jump over each other. They stay where they were. Your change is saved a moment after your last tap, and again when you tap **Done** or leave the page. If a save fails you get a message and the list goes back to what is saved.
+
+**Quick check.** Tap **▶ Check** to go through the items shown, one by one, in list order, starting at the top. Pick **eBay newest** or **Facebook**. Only items that can be searched on that site are included, and the button shows how many. The first search opens straight away. When you come back to the page, a panel at the bottom shows the next item, counts down about 2 seconds and opens it for you. You can tap **Skip**, **Open now** or **Stop**. If you leave during the countdown, it waits and shows **Continue**. Your place is remembered on the device for 12 hours. On a computer there is no countdown, because the browser would block the new tabs. Tap **Open** for each item instead.
+
+On iPhone the Facebook app drops the filters, so for Facebook the panel repeats what to set by hand. To get your best items first, arrange the list or use the High priority chip before you start.
+
 ## How it works
 
 - The site is a plain web page (HTML, CSS and JavaScript). GitHub Pages hosts it for free. There is no server of our own.
@@ -30,7 +40,7 @@ Distance only applies to Facebook: it uses the item's distance, or a default rad
 - `styles.css`: the page's look (colours, layout, text size).
 - `js/config.js`: the database address and public key. Safe to publish (see above).
 - `js/links.js`: builds the eBay and Facebook links. The only file that knows their URL codes.
-- `js/db.js`: reads and saves items in the database.
+- `js/db.js`: reads and saves items in the database, including the list order.
 - `js/app.js`: the page's behaviour, showing items and handling buttons.
 - `supabase/migrations/`: the database setup (tables and security rules), applied in order.
 - `tests/`: automatic tests for `js/links.js`. `tests/run.sh` runs them.

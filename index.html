@@ -60,6 +60,10 @@
         </div>
         <button type="button" id="btn-settings" class="icon-btn" aria-label="Settings">&#9881;</button>
       </div>
+      <div class="topbar-actions" id="topbar-actions">
+        <button type="button" id="btn-check" class="btn">&#9654; Check</button>
+        <button type="button" id="btn-arrange" class="btn">Arrange</button>
+      </div>
       <div class="chips" id="chips" role="group" aria-label="Filters">
         <button type="button" class="chip" data-status="hunting" aria-pressed="true">Hunting</button>
         <button type="button" class="chip" data-status="paused" aria-pressed="false">Paused</button>
@@ -86,6 +90,8 @@
       </div>
       <p id="count" class="count" aria-live="polite"></p>
     </div>
+
+    <p id="arrange-hint" class="arrange-hint" hidden></p>
 
     <ul id="list" class="list"></ul>
     <div id="empty" class="empty" hidden>
@@ -296,6 +302,40 @@
     </div>
   </form>
 </dialog>
+
+<!-- ============ Quick check: start sheet ============ -->
+<dialog id="check-sheet" class="sheet sheet-small" aria-labelledby="check-sheet-title">
+  <div class="sheet-head">
+    <h2 id="check-sheet-title">Quick check</h2>
+    <button type="button" id="check-sheet-x" class="icon-btn" aria-label="Close Quick check">&times;</button>
+  </div>
+  <div class="sheet-scroll">
+    <p>Goes through the items shown, in order, starting at the top.</p>
+    <div id="check-options" class="check-options"></div>
+    <p class="hint">Arrange your list or use the High priority chip so your top items come first.</p>
+  </div>
+</dialog>
+
+<!-- ============ Arrange: move to a position ============ -->
+<dialog id="move-dialog" class="confirm" aria-labelledby="move-title" aria-describedby="move-text">
+  <form id="move-form" novalidate>
+    <h2 id="move-title">Move to position</h2>
+    <p id="move-text"></p>
+    <div class="field">
+      <label for="move-input" class="sr-only">Position</label>
+      <input id="move-input" type="text" inputmode="numeric" autocomplete="off" aria-describedby="move-err">
+      <p class="field-error" id="move-err" role="alert"></p>
+    </div>
+    <div class="sheet-actions">
+      <span class="spacer"></span>
+      <button type="button" id="move-cancel" class="btn">Cancel</button>
+      <button type="submit" id="move-ok" class="btn btn-primary">Move</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- ============ Quick check: panel shown while a check is running ============ -->
+<section id="check-panel" class="check-panel" role="region" aria-label="Quick check" aria-live="polite" hidden></section>
 
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
