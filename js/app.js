@@ -489,16 +489,31 @@
   }
 
   // kind: 'up' | 'down' | 'top' | 'to'. Moves relative to the visible items.
+  //   Up / Down: the page follows the item (it only moves one place).
+  //   Top / a typed place: the page stays where you are, so you can go on
+  //   arranging the items around you. A short message says where it went.
   function moveItem(id, kind, n, focusKey) {
     id = String(id);
     var next = reorder(idsOf(state.items), idsOf(state.items.filter(matchesFilters)), id, kind, n);
     if (!next) { return false; }
+    var stay = kind === 'top' || kind === 'to';
+    var scrollY = window.scrollY;            // where you are, before the list is rebuilt
     applyOrder(next);
     orderEpoch += 1;
     saveCache();
     renderList(focusKey);
-    var li = $('list').querySelector('[data-id="' + id.replace(/"/g, '') + '"]');
-    if (li && li.scrollIntoView) { li.scrollIntoView({ block: 'nearest' }); }
+    if (stay) {
+      window.scrollTo(0, scrollY);           // put the page back exactly where it was
+      var shown = state.items.filter(matchesFilters);
+      var place = 0;
+      shown.forEach(function (it, i) { if (String(it.id) === id) { place = i + 1; } });
+      var moved = itemById(id);
+      var name = (moved && str(moved.name)) || '(no name)';
+      toast(place === 1 ? 'Moved to the top: ' + name : 'Moved to place ' + place + ': ' + name);
+    } else {
+      var li = $('list').querySelector('[data-id="' + id.replace(/"/g, '') + '"]');
+      if (li && li.scrollIntoView) { li.scrollIntoView({ block: 'nearest' }); }
+    }
     scheduleOrderSave();
     return true;
   }
