@@ -495,6 +495,37 @@ test('Facebook location: a missing, null or blank id is left out of the path', f
 });
 
 // ---------------------------------------------------------------------------
+// Facebook app link (iPhone / iPad): search words only
+// ---------------------------------------------------------------------------
+section('Facebook app link');
+
+test('Facebook app link: only the search words, nothing else', function () {
+  var item = { name: 'tudor sub', condition: 'used', min_price: 20, max_price: 800, distance_mi: 50 };
+  var fb = BL.buildFacebookAppUrl(item);
+  assertEqual(fb, FB_BASE + 'query=tudor%20sub', 'whole URL');
+});
+
+test('Facebook app link: never has a location ID in the path', function () {
+  // The settings are ignored on purpose; passing them must not add a location.
+  var fb = BL.buildFacebookAppUrl({ name: 'seiko' }, { fb_location_id: '123456789', default_fb_radius_mi: 40 });
+  assertStartsWith(fb, FB_BASE, 'path');
+  assertNotContains(fb, '123456789', 'no location ID');
+  assertNotContains(fb, 'radius', 'no radius');
+});
+
+test('Facebook app link: drops minus words and quote marks like the full link', function () {
+  var fb = BL.buildFacebookAppUrl({ name: 'knipex “97 01 125” -used' });
+  assertEqual(param(fb, 'query'), 'knipex 97 01 125', 'query');
+  assertNotContains(fb, 'used', 'no exclusion word');
+});
+
+test('Facebook app link: null when there is nothing to search', function () {
+  [null, {}, { name: '' }, { name: '-solar' }].forEach(function (item) {
+    assertNull(BL.buildFacebookAppUrl(item), 'app link for ' + show(item));
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Summary
 // ---------------------------------------------------------------------------
 var total = passed + failures.length;

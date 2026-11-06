@@ -58,7 +58,7 @@ On iPhone the Facebook app drops the filters, so for Facebook the panel repeats 
 3. Run the tests (see below).
 4. Tap a few item buttons on your iPhone. The tests only check how links are built. They can't tell whether eBay or Facebook still accept them.
 
-What the iPhone test showed (Nov 2026): the eBay app keeps every filter from the link. The Facebook app searches the words but drops the filters, which is why the page shows a "set these in the app" hint under the Facebook button.
+What the iPhone test showed (Nov 2026): the eBay app keeps every filter from the link. The Facebook app searches the words but drops the filters, which is why the page shows a "set these in the app" hint under the Facebook button. Once a Facebook location ID was added in Settings, the Facebook app opened the search but showed no listings. So on iPhone and iPad the Facebook link now carries the search words only, with no location and no filters. The app searches around the location set inside the Facebook app. A computer still gets the full link.
 
 ## Run the tests
 

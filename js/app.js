@@ -139,6 +139,13 @@
     return IS_IOS ? null : { target: '_blank', rel: 'noopener' };
   }
 
+  // The Facebook link for this device. iPhone/iPad hand it to the Facebook
+  // app, which shows nothing when the link carries a location ID, so it gets
+  // the search words only. A computer gets the full link with every filter.
+  function facebookUrl(item, settings) {
+    return IS_IOS ? Links.buildFacebookAppUrl(item) : Links.buildFacebookUrl(item, settings);
+  }
+
   // The only function that sets an href. `url` must come from a BuyLinks builder.
   function linkEl(url, className, kids) {
     var a = h('a', { 'class': className }, kids);
@@ -929,7 +936,7 @@
         target ? 'Max bid ' + money(target.value) : 'Auctions, ending soonest', 'ending'));
     }
     if (sites.indexOf('facebook') !== -1) {
-      var fbUrl = Links.buildFacebookUrl(item, settings);
+      var fbUrl = facebookUrl(item, settings);
       var fbBtn = linkButton(fbUrl, 'Facebook', 'Marketplace, newest first', 'fb');
       if (IS_IOS && fbUrl) {
         wrap.appendChild(h('div', { 'class': 'link-group' }, fbBtn,
@@ -970,7 +977,7 @@
     var sites = searchedSites(item);
     var box = h('div', { 'class': 'alerts' });
     if (sites.indexOf('ebay') !== -1) { box.appendChild(alertRow(item, 'ebay', Links.buildEbayNewUrl(item, settings))); }
-    if (sites.indexOf('facebook') !== -1) { box.appendChild(alertRow(item, 'facebook', Links.buildFacebookUrl(item, settings))); }
+    if (sites.indexOf('facebook') !== -1) { box.appendChild(alertRow(item, 'facebook', facebookUrl(item, settings))); }
     return section('Alerts', box);
   }
 
@@ -1090,7 +1097,7 @@
   function sweepUrl(site, item) {
     if (!item || searchedSites(item).indexOf(site) === -1 || !Links.canSearch(item)) { return null; }
     var settings = state.settings || {};
-    var url = site === 'ebay' ? Links.buildEbayNewUrl(item, settings) : Links.buildFacebookUrl(item, settings);
+    var url = site === 'ebay' ? Links.buildEbayNewUrl(item, settings) : facebookUrl(item, settings);
     return url || null;
   }
 

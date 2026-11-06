@@ -341,6 +341,17 @@
     return path + 'search/?' + buildQuery(pairs);
   }
 
+  // The Facebook link for the Facebook APP (iPhone / iPad): search words only.
+  // iPhone test (Nov 2026): the app keeps the words but ignores every filter,
+  // and once a location ID was in the address it showed no listings at all.
+  // So the app gets no location and no filters; it searches around the
+  // Marketplace location set inside the app.
+  function buildFacebookAppUrl(item) {
+    if (!canSearch(item)) { return null; }
+    var f = CODES.facebook;
+    return f.base + 'search/?' + buildQuery([[f.param.query, facebookQuery(item)]]);
+  }
+
   // ---------------------------------------------------------------------------
   root.BuyLinks = {
     CODES: CODES,
@@ -349,6 +360,7 @@
     buildEbayNewUrl: buildEbayNewUrl,
     buildEbayEndingUrl: buildEbayEndingUrl,
     buildFacebookUrl: buildFacebookUrl,
+    buildFacebookAppUrl: buildFacebookAppUrl,
     ebayCategoryId: ebayCategoryId
   };
 })(typeof window !== 'undefined' ? window : this);
